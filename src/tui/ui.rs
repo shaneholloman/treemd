@@ -9,6 +9,9 @@ use ratatui::widgets::{
 use ratatui::Frame;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
+    // Update content metrics before rendering to ensure content height and scroll are correct
+    app.update_content_metrics();
+
     let area = frame.area();
 
     // Create main layout with title bar and content
@@ -85,8 +88,7 @@ fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
     let items: Vec<ListItem> = app
         .outline_items
         .iter()
-        .enumerate()
-        .map(|(idx, item)| {
+        .map(|item| {
             let indent = "  ".repeat(item.level.saturating_sub(1));
             let prefix = "#".repeat(item.level);
 
@@ -97,8 +99,8 @@ fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
                 "  "
             };
 
-            // Show bookmark indicator if this item is bookmarked
-            let bookmark_indicator = if app.bookmark_position == Some(idx) {
+            // Show bookmark indicator if this item's text matches the bookmark
+            let bookmark_indicator = if app.bookmark_position.as_ref().map(|s| s.as_str()) == Some(&item.text) {
                 "⚑ "
             } else {
                 ""

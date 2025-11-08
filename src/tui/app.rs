@@ -27,12 +27,13 @@ pub struct App {
     pub highlighter: SyntaxHighlighter,
     pub show_outline: bool,
     pub outline_width: u16, // Percentage: 20, 30, or 40
-    pub bookmark_position: Option<usize>, // Bookmarked outline position
+    pub bookmark_position: Option<String>, // Bookmarked heading text (was: outline position)
     collapsed_headings: HashSet<String>, // Track which headings are collapsed by text
     pub current_theme: ThemeName,
     pub theme: Theme,
     pub show_theme_picker: bool,
     pub theme_picker_selected: usize,
+    previous_selection: Option<String>, // Track previous selection to detect changes
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +83,7 @@ impl App {
             theme,
             show_theme_picker: false,
             theme_picker_selected: 0,
+            previous_selection: None,
         }
     }
 
@@ -117,6 +119,46 @@ impl App {
         }
 
         items
+    }
+
+    /// Select a heading by its text. Returns true if found and selected.
+    fn select_by_text(&mut self, text: &str) -> bool {
+        for (idx, item) in self.outline_items.iter().enumerate() {
+            if item.text == text {
+                self.outline_state.select(Some(idx));
+                self.outline_scroll_state = self.outline_scroll_state.position(idx);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Update content height based on current selection and reset scroll if selection changed
+    pub fn update_content_metrics(&mut self) {
+        let current_selection = self.selected_heading_text().map(|s| s.to_string());
+
+        // Check if selection changed
+        if current_selection != self.previous_selection {
+            // Reset content scroll when selection changes
+            self.content_scroll = 0;
+            self.previous_selection = current_selection.clone();
+        }
+
+        // Update content height based on current section
+        let content_text = if let Some(heading_text) = &current_selection {
+            if let Some(_heading) = self.document.find_heading(heading_text) {
+                // Use extract_section_content to get the actual displayed content
+                self.document.extract_section(heading_text).unwrap_or_else(|| self.document.content.clone())
+            } else {
+                self.document.content.clone()
+            }
+        } else {
+            self.document.content.clone()
+        };
+
+        let content_lines = content_text.lines().count();
+        self.content_height = content_lines as u16;
+        self.content_scroll_state = ScrollbarState::new(content_lines).position(self.content_scroll as usize);
     }
 
     pub fn next(&mut self) {
@@ -213,6 +255,9 @@ impl App {
     }
 
     fn filter_outline(&mut self) {
+        // Save current selection text
+        let current_selection = self.selected_heading_text().map(|s| s.to_string());
+
         if self.search_query.is_empty() {
             // Reset to full tree
             self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
@@ -225,10 +270,18 @@ impl App {
                 .collect();
         }
 
-        // Reset selection
+        // Try to restore previous selection, otherwise select first item
         if !self.outline_items.is_empty() {
-            self.outline_state.select(Some(0));
-            self.outline_scroll_state = ScrollbarState::new(self.outline_items.len());
+            let restored = if let Some(text) = current_selection {
+                self.select_by_text(&text)
+            } else {
+                false
+            };
+
+            if !restored {
+                self.outline_state.select(Some(0));
+                self.outline_scroll_state = ScrollbarState::new(self.outline_items.len()).position(0);
+            }
         }
     }
 
@@ -257,16 +310,19 @@ impl App {
                     if self.collapsed_headings.contains(&heading_text) {
                         self.collapsed_headings.remove(&heading_text);
                     } else {
-                        self.collapsed_headings.insert(heading_text);
+                        self.collapsed_headings.insert(heading_text.clone());
                     }
 
                     // Rebuild the flattened list
                     self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
 
-                    // Restore selection position
-                    self.outline_state.select(Some(i.min(self.outline_items.len().saturating_sub(1))));
-                    self.outline_scroll_state = ScrollbarState::new(self.outline_items.len())
-                        .position(i.min(self.outline_items.len().saturating_sub(1)));
+                    // Restore selection by text (not by index)
+                    if !self.select_by_text(&heading_text) {
+                        // If heading not found (shouldn't happen), clamp to valid index
+                        let safe_idx = i.min(self.outline_items.len().saturating_sub(1));
+                        self.outline_state.select(Some(safe_idx));
+                        self.outline_scroll_state = ScrollbarState::new(self.outline_items.len()).position(safe_idx);
+                    }
                 }
             }
         }
@@ -284,9 +340,13 @@ impl App {
                     // Rebuild the flattened list
                     self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
 
-                    // Restore selection position
-                    self.outline_state.select(Some(i));
-                    self.outline_scroll_state = ScrollbarState::new(self.outline_items.len()).position(i);
+                    // Restore selection by text (not by index)
+                    if !self.select_by_text(&heading_text) {
+                        // If heading not found (shouldn't happen), clamp to valid index
+                        let safe_idx = i.min(self.outline_items.len().saturating_sub(1));
+                        self.outline_state.select(Some(safe_idx));
+                        self.outline_scroll_state = ScrollbarState::new(self.outline_items.len()).position(safe_idx);
+                    }
                 }
             }
         }
@@ -297,39 +357,51 @@ impl App {
             if let Some(i) = self.outline_state.selected() {
                 if i < self.outline_items.len() {
                     let current_level = self.outline_items[i].level;
+                    let current_text = self.outline_items[i].text.clone();
 
                     // If current heading has children, collapse it
                     if self.outline_items[i].has_children {
-                        let heading_text = self.outline_items[i].text.clone();
-                        self.collapsed_headings.insert(heading_text);
+                        self.collapsed_headings.insert(current_text.clone());
+
+                        // Rebuild the flattened list
+                        self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
+
+                        // Restore selection by text
+                        if !self.select_by_text(&current_text) {
+                            let safe_idx = i.min(self.outline_items.len().saturating_sub(1));
+                            self.outline_state.select(Some(safe_idx));
+                            self.outline_scroll_state = ScrollbarState::new(self.outline_items.len()).position(safe_idx);
+                        }
                     } else {
                         // If no children, find parent and collapse it
                         // Look backwards for first heading with lower level
+                        let mut parent_text: Option<String> = None;
                         for idx in (0..i).rev() {
                             if self.outline_items[idx].level < current_level {
-                                // Found parent, collapse it
-                                let parent_text = self.outline_items[idx].text.clone();
-                                self.collapsed_headings.insert(parent_text);
+                                // Found parent
+                                parent_text = Some(self.outline_items[idx].text.clone());
+                                break;
+                            }
+                        }
 
-                                // Rebuild and move selection to parent
-                                self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
-                                self.outline_state.select(Some(idx.min(self.outline_items.len().saturating_sub(1))));
-                                self.outline_scroll_state = ScrollbarState::new(self.outline_items.len())
-                                    .position(idx.min(self.outline_items.len().saturating_sub(1)));
-                                return;
+                        if let Some(parent) = parent_text {
+                            // Collapse the parent
+                            self.collapsed_headings.insert(parent.clone());
+
+                            // Rebuild and move selection to parent
+                            self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
+
+                            // Select the parent by text
+                            if !self.select_by_text(&parent) {
+                                // Fallback: select first item if parent not found
+                                if !self.outline_items.is_empty() {
+                                    self.outline_state.select(Some(0));
+                                    self.outline_scroll_state = ScrollbarState::new(self.outline_items.len()).position(0);
+                                }
                             }
                         }
                         // No parent found, do nothing
-                        return;
                     }
-
-                    // Rebuild the flattened list
-                    self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
-
-                    // Restore selection position
-                    self.outline_state.select(Some(i.min(self.outline_items.len().saturating_sub(1))));
-                    self.outline_scroll_state = ScrollbarState::new(self.outline_items.len())
-                        .position(i.min(self.outline_items.len().saturating_sub(1)));
                 }
             }
         }
@@ -379,15 +451,14 @@ impl App {
     }
 
     pub fn set_bookmark(&mut self) {
-        self.bookmark_position = self.outline_state.selected();
+        // Store bookmark as heading text instead of index
+        self.bookmark_position = self.selected_heading_text().map(|s| s.to_string());
     }
 
     pub fn jump_to_bookmark(&mut self) {
-        if let Some(pos) = self.bookmark_position {
-            if pos < self.outline_items.len() {
-                self.outline_state.select(Some(pos));
-                self.outline_scroll_state = self.outline_scroll_state.position(pos);
-            }
+        // Jump to bookmark by finding the heading text
+        if let Some(text) = self.bookmark_position.clone() {
+            self.select_by_text(&text);
         }
     }
 

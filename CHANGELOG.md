@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-11-08
+
+### Fixed
+
+- **Content display robustness** - Fixed critical bugs where content would disappear or show incorrect sections after navigation and collapse/expand operations
+- **Selection preservation** - Selection now correctly preserved by heading text instead of index during collapse/expand operations
+- **Content scroll reset** - Content scroll now properly resets to top when navigating between different sections
+- **Dynamic content height** - Content height and scrollbar now correctly update based on the currently selected section
+- **Collapse parent behavior** - Collapsing a parent heading now correctly selects the parent instead of an arbitrary item
+- **Search filter preservation** - Search filtering now maintains the current selection when possible instead of always jumping to first item
+- **Bookmark stability** - Bookmarks now store heading text instead of indices, remaining valid after collapse operations
+
+### Technical
+
+- Added `select_by_text()` helper method for robust text-based selection
+- Added `update_content_metrics()` to synchronize content height and scroll state
+- Added `previous_selection` tracking to detect selection changes
+- Changed bookmark storage from `Option<usize>` to `Option<String>`
+
 ## [0.1.1] - 2025-11-08 - Add library
 
 ## [0.1.0] - 2025-11-08 - Initial Release 🚀
