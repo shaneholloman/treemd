@@ -1,0 +1,18 @@
+.*
+.DS_Store
+.env
+# Build artifacts
+/target
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+
+*.md
+!README.md
+!CHANGELOG.md

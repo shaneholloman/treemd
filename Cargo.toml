@@ -18,13 +18,13 @@ rust-version = "1.81"
 clap = { version = "4.5", features = ["derive"] }
 
 # Markdown parsing
-pulldown-cmark = "0.12"
+pulldown-cmark = "0.13"
 
 # Tree data structure for heading hierarchy
 indextree = "4.7"
 
 # Terminal styling for CLI mode
-termimad = "0.30"
+termimad = "0.34"
 
 # Serialization for JSON output
 serde = { version = "1.0", features = ["derive"] }
@@ -32,7 +32,7 @@ serde_json = "1.0"
 
 # TUI framework
 ratatui = "0.29"
-crossterm = "0.28"
+crossterm = "0.29"
 color-eyre = "0.6"
 
 # Syntax highlighting
