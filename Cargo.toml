@@ -1,6 +1,6 @@
 [package]
 name = "treemd"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 authors = ["epistates, inc. <nick@epistates.com>"]
 description = "A markdown navigator with tree-based structural navigation and syntax highlighting"
@@ -24,6 +24,7 @@ path = "src/main.rs"
 [dependencies]
 # CLI framework
 clap = { version = "4.5", features = ["derive"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 
 # Markdown parsing
 pulldown-cmark = "0.13"
@@ -51,6 +52,10 @@ nucleo-matcher = "0.3"
 
 # Clipboard support
 arboard = { version = "3.4", features = ["wayland-data-control"] }
+
+[features]
+default = ["unstable-dynamic"]
+unstable-dynamic = ["clap_complete/unstable-dynamic"]
 
 [profile.release]
 # Enable Link Time Optimization for better performance and smaller binary
