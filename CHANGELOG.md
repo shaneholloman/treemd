@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2025-11-09
+
+### Fixed
+
+- **Binary corruption in releases** - Wrap binaries in platform-appropriate archives to preserve file permissions and prevent corruption through GitHub Actions artifact system
+- **Executable permissions lost** - Fixed issue where Unix binaries lost +x permission during artifact upload/download
+- **SHA256 mismatch** - Generate checksums at build time and verify after extraction to ensure binary integrity
+- **Cache conflicts** - Use unique cache keys per target to prevent 409 conflicts in parallel builds
+- **Cross-platform compatibility** - Use native tools on each platform (PowerShell on Windows, bash on Unix)
+
+### Added
+
+- **Individual SHA256 files** - Each binary now has a corresponding .sha256 file generated at build time
+- **Combined SHA256SUMS** - All binaries included in a single SHA256SUMS file in releases for easy verification
+- **Checksum verification** - Automated verification step that checksums match after artifact extraction
+- **Build-time checksums** - SHA256 printed during build for traceability
+- **Platform-specific packaging** - Unix binaries distributed as .tar.gz, Windows binaries as .zip
+
+### Changed
+
+- **Updated GitHub Actions** - Upgraded all actions to latest major versions for automatic updates and security
+
+ ### Technical
+
+- Unix: tar.gz archives preserve executable permissions through artifact system
+- Windows: zip archives created with PowerShell's Compress-Archive
+- Unix: SHA256 generated with sha256sum, Windows: Get-FileHash cmdlet
+- Cache keys now include both target and Cargo.lock hash
+- Comprehensive logging at each stage (build, extract, verify)
+- Release extraction handles both tar.gz and zip formats
+
 ## [0.1.4] - 2025-11-09
 
 ### Changed

@@ -36,13 +36,16 @@ jobs:
             use_cross: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: ${{ matrix.target }}
 
       # Install cross for Linux ARM builds
       - name: Install cross
@@ -85,7 +88,7 @@ jobs:
       - name: Import Apple Code Signing Certificate
         if: runner.os == 'macOS'
         continue-on-error: true
-        uses: Apple-Actions/import-codesign-certs@v2
+        uses: Apple-Actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -133,22 +136,44 @@ jobs:
           fi
 
 
-      - name: Prepare artifacts
+      - name: Prepare artifacts (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $binary = "treemd-${{ matrix.target }}.exe"
+          Copy-Item "target/${{ matrix.target }}/release/treemd.exe" $binary
+
+          # Create zip for Windows (tar.gz not common on Windows)
+          Compress-Archive -Path $binary -DestinationPath "artifacts/$binary.zip"
+
+          # Generate SHA256
+          $hash = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLower()
+          "$hash  $binary" | Out-File -FilePath "artifacts/$binary.sha256" -Encoding ascii -NoNewline
+
+          Write-Host "Binary info:"
+          Get-Item $binary | Format-List Length, LastWriteTime
+          Get-Content "artifacts/$binary.sha256"
+        shell: pwsh
+
+      - name: Prepare artifacts (Unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p artifacts
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/treemd.exe" "artifacts/treemd-${{ matrix.target }}.exe"
-          else
-            cp "target/${{ matrix.target }}/release/treemd" "artifacts/treemd-${{ matrix.target }}"
-            chmod +x "artifacts/treemd-${{ matrix.target }}"
-          fi
+          BINARY="treemd-${{ matrix.target }}"
+          cp "target/${{ matrix.target }}/release/treemd" "$BINARY"
+          chmod +x "$BINARY"
+
+          # Create tar to preserve permissions and prevent corruption
+          tar -czf "artifacts/$BINARY.tar.gz" "$BINARY"
+          sha256sum "$BINARY" > "artifacts/$BINARY.sha256"
+          ls -lh "$BINARY"
+          cat "artifacts/$BINARY.sha256"
         shell: bash
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: artifacts/
+          path: artifacts/*
           if-no-files-found: error
           retention-days: 1
 
@@ -161,7 +186,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -171,13 +196,50 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p final-release
-          find release-artifacts -type f -exec cp {} final-release/ \;
+
+          # Extract all tarballs (Unix)
+          find release-artifacts -name "*.tar.gz" -type f | while read tarball; do
+            echo "Extracting $tarball"
+            tar -xzf "$tarball" -C final-release/
+          done
+
+          # Extract all zips (Windows)
+          find release-artifacts -name "*.zip" -type f | while read zipfile; do
+            echo "Extracting $zipfile"
+            unzip -o "$zipfile" -d final-release/
+          done
+
+          # Copy SHA files
+          find release-artifacts -name "*.sha256" -type f -exec cp {} final-release/ \;
+
           # Restore execute permissions on all binaries (not .exe files)
-          find final-release -type f ! -name "*.exe" -exec chmod +x {} \;
-          ls -la final-release/
+          find final-release -type f ! -name "*.exe" ! -name "*.sha256" -exec chmod +x {} \;
+
+          echo "Final release contents:"
+          ls -lah final-release/
+
+          echo "Verifying checksums:"
+          cd final-release
+          for shafile in *.sha256; do
+            echo "Checking $shafile:"
+            sha256sum -c "$shafile" || true
+          done
+        shell: bash
+
+      - name: Generate combined checksums
+        run: |
+          cd final-release
+          sha256sum treemd-* | grep -v ".sha256" > SHA256SUMS
+          cat SHA256SUMS
+        shell: bash
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: final-release/*
+          files: |
+            final-release/treemd-*
+            final-release/SHA256SUMS
           generate_release_notes: true
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
