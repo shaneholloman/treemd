@@ -202,39 +202,35 @@ jobs:
         run: |
           mkdir -p final-release
 
-          # Extract all tarballs (Unix)
-          find release-artifacts -name "*.tar.gz" -type f | while read tarball; do
-            echo "Extracting $tarball"
-            tar -xzf "$tarball" -C final-release/
-          done
+          # Copy archives directly (tar.gz and zip preserve permissions internally)
+          find release-artifacts -name "*.tar.gz" -type f -exec cp {} final-release/ \;
+          find release-artifacts -name "*.zip" -type f -exec cp {} final-release/ \;
 
-          # Extract all zips (Windows)
-          find release-artifacts -name "*.zip" -type f | while read zipfile; do
-            echo "Extracting $zipfile"
-            unzip -o "$zipfile" -d final-release/
-          done
-
-          # Copy SHA files
+          # Copy individual SHA256 files
           find release-artifacts -name "*.sha256" -type f -exec cp {} final-release/ \;
-
-          # Restore execute permissions on all binaries (not .exe files)
-          find final-release -type f ! -name "*.exe" ! -name "*.sha256" -exec chmod +x {} \;
 
           echo "Final release contents:"
           ls -lah final-release/
 
-          echo "Verifying checksums:"
+          echo "Verifying archive integrity:"
           cd final-release
-          for shafile in *.sha256; do
-            echo "Checking $shafile:"
-            sha256sum -c "$shafile" || true
+          for archive in *.tar.gz; do
+            [ -f "$archive" ] || continue
+            echo "Testing $archive:"
+            tar -tzf "$archive" | head -5
+          done
+          for archive in *.zip; do
+            [ -f "$archive" ] || continue
+            echo "Testing $archive:"
+            unzip -l "$archive"
           done
         shell: bash
 
       - name: Generate combined checksums
         run: |
           cd final-release
-          sha256sum treemd-* | grep -v ".sha256" > SHA256SUMS
+          # Generate SHA256SUMS for archives (not individual binaries)
+          sha256sum *.tar.gz *.zip 2>/dev/null | grep -v "No such file" > SHA256SUMS || true
           cat SHA256SUMS
         shell: bash
 
@@ -242,7 +238,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            final-release/treemd-*
+            final-release/*.tar.gz
+            final-release/*.zip
+            final-release/*.sha256
             final-release/SHA256SUMS
           generate_release_notes: true
           draft: false
