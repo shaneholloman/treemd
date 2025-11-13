@@ -5,6 +5,129 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-01-13
+
+### Added
+
+- **Link Following System** - Complete markdown link navigation with visual feedback and multi-file support
+  - Press `f` to enter link follow mode with interactive link picker popup
+  - Navigate links with `Tab`/`Shift+Tab`, `j`/`k`, or arrow keys
+  - Jump directly to links using number keys (`1-9`)
+  - Visual popup shows all links in current section with highlighting
+  - Selected link indicated with green arrow (▶), bold, and underline
+  - Real-time status messages for all actions
+
+- **Link Type Support** - Handles all markdown link formats
+  - **Anchor links** - `[Go](#installation)` jumps to heading in current file
+  - **Relative file links** - `[API](./docs/api.md)` loads markdown files
+  - **File + anchor links** - `[Guide](./guide.md#usage)` loads file and jumps to section
+  - **WikiLinks** - `[[README]]` and `[[README|docs]]` with Obsidian-style syntax
+  - **External URLs** - `[GitHub](https://...)` opens in default browser + copies to clipboard
+
+- **Navigation History** - Back/forward navigation between files
+  - Press `b` or `Backspace` to go back to previous file
+  - Press `Shift+F` to go forward in navigation history
+  - Full state preservation (scroll position, selected heading)
+  - Separate history stacks for back and forward navigation
+
+- **Parent Jump** - Quick navigation to parent headings
+  - Press `p` in normal mode to jump to parent heading in outline
+  - Press `p` in link follow mode to jump to parent's links (stays in link mode)
+  - Searches backwards for nearest heading with lower level
+  - Status messages indicate when already at top-level
+
+- **Cross-Platform Browser Integration** - Reliable URL opening
+  - Uses `open` crate for macOS, Linux, Windows, and WSL support
+  - Automatically opens external links in default browser
+  - Fallback to clipboard if browser fails
+  - User-friendly status messages for all outcomes
+
+- **Live File Editing** - Edit files in default editor with auto-reload
+  - Press `e` to open current file in editor (respects `$VISUAL` and `$EDITOR`)
+  - Proper terminal suspension and restoration (follows ratatui best practices)
+  - Auto-reloads file after editing with position preservation
+  - Restores heading selection and scroll position when possible
+  - Works with vim, nano, emacs, VS Code, or any configured editor
+  - Uses `edit` crate for reliable cross-platform editor detection
+
+### Changed
+
+- **App State Enhancement** - Added comprehensive link following state management
+  - New `AppMode` enum: `Normal`, `LinkFollow`, `Search`, `ThemePicker`, `Help`
+  - `FileState` struct for navigation history with full document state
+  - Link tracking: `links_in_view`, `selected_link_idx`, `file_history`, `file_future`
+  - Temporary status message system with icons (✓, ⚠, ✗)
+
+- **UI Enhancements** - Better visual feedback for all operations
+  - Link navigator popup with styled content (80% width, 60% height)
+  - Enhanced status bar shows current link details in link mode
+  - Content title displays link count: `[Links: 3]`
+  - Help screen updated with link following keybindings section
+
+- **Event Handling** - New keyboard shortcuts for link navigation and editing
+  - `f` - Enter link follow mode
+  - `Tab`/`Shift+Tab` - Navigate links forward/backward
+  - `j`/`k`/`↓`/`↑` - Navigate links (vim-style + arrows)
+  - `1-9` - Jump directly to link by number
+  - `Enter` - Follow selected link
+  - `Esc` - Exit link follow mode
+  - `p` - Jump to parent (context-aware)
+  - `b`/`Backspace` - Go back
+  - `Shift+F` - Go forward
+  - `e` - Edit current file in default editor
+
+### Technical
+
+- **New Parser Module** - `src/parser/links.rs` (320 lines)
+  - `Link` struct with text, target, and byte offset
+  - `LinkTarget` enum for type-safe link representation
+  - `extract_links()` function with two-pass parsing
+  - 10 comprehensive tests covering all link types
+  - Custom wikilink regex parser for `[[filename]]` syntax
+
+- **Link Detection** - Robust parsing using pulldown-cmark
+  - First pass: Standard markdown links via pulldown-cmark events
+  - Second pass: Custom regex for wikilink syntax
+  - Extracts link text, target, and byte offset for each link
+  - Handles malformed links gracefully
+
+- **File Resolution** - Smart path and wikilink handling
+  - Resolves relative file paths from current file location
+  - Wikilink search in current directory (`.md` extension added automatically)
+  - Anchor normalization (lowercase, dash-separated)
+  - Error handling with descriptive messages
+
+- **Visual Rendering** - Popup overlay system
+  - `render_link_picker()` function (130 lines)
+  - Centered popup with styled spans for each link
+  - Color-coded elements (green/yellow/white/gray)
+  - Scrollable for many links
+  - Footer with keybinding hints
+
+- **State Management** - Clean separation of concerns
+  - Link mode completely separate from normal navigation
+  - History stacks preserve full document state
+  - Status messages cleared on next keypress
+  - Mode transitions preserve relevant state
+
+- **Terminal Management** - Proper TUI suspension for external programs
+  - `run_editor()` function handles terminal state transitions
+  - Suspends TUI: LeaveAlternateScreen → disable_raw_mode
+  - Spawns editor with full terminal control
+  - Restores TUI: EnterAlternateScreen → enable_raw_mode → clear
+  - Follows official ratatui best practices for external process spawning
+  - Prevents rendering artifacts and ANSI escape code leakage
+
+- **Dependencies Added**
+  - `open = "5.3"` - Cross-platform URL/file opening
+  - `edit = "0.1"` - Cross-platform editor detection and invocation
+
+- **Code Quality**
+  - Zero clippy warnings
+  - All 21 tests passing (18 unit + 3 doc tests)
+  - Comprehensive documentation
+  - Clean error handling throughout
+
 ## [0.1.7] - 2025-01-10
 
 ### Fixed
