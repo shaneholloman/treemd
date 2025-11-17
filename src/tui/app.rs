@@ -1,5 +1,7 @@
+use crate::config::Config;
 use crate::parser::{Document, HeadingNode, Link, extract_links};
 use crate::tui::syntax::SyntaxHighlighter;
+use crate::tui::terminal_compat::ColorMode;
 use crate::tui::theme::{Theme, ThemeName};
 use ratatui::widgets::{ListState, ScrollbarState};
 use std::collections::HashSet;
@@ -58,6 +60,10 @@ pub struct App {
     // Persistent clipboard for Linux X11 compatibility
     // On Linux, the clipboard instance must stay alive to serve paste requests
     clipboard: Option<arboard::Clipboard>,
+
+    // Configuration persistence
+    config: Config,
+    color_mode: ColorMode,
 }
 
 /// Saved state for file navigation history
@@ -80,7 +86,13 @@ pub struct OutlineItem {
 }
 
 impl App {
-    pub fn new(document: Document, filename: String, file_path: PathBuf) -> Self {
+    pub fn new(
+        document: Document,
+        filename: String,
+        file_path: PathBuf,
+        config: Config,
+        color_mode: ColorMode,
+    ) -> Self {
         let tree = document.build_tree();
         let collapsed_headings = HashSet::new();
         let outline_items = Self::flatten_tree(&tree, &collapsed_headings);
@@ -92,8 +104,12 @@ impl App {
 
         let content_lines = document.content.lines().count();
 
-        let current_theme = ThemeName::OceanDark;
-        let theme = Theme::from_name(current_theme);
+        // Load theme from config and apply color mode
+        let current_theme = config.theme_name();
+        let theme = Theme::from_name(current_theme).with_color_mode(color_mode);
+
+        // Load outline width from config
+        let outline_width = config.ui.outline_width;
 
         Self {
             document,
@@ -112,7 +128,7 @@ impl App {
             search_query: String::new(),
             highlighter: SyntaxHighlighter::new(),
             show_outline: true,
-            outline_width: 30,
+            outline_width,
             bookmark_position: None,
             collapsed_headings,
             current_theme,
@@ -132,6 +148,10 @@ impl App {
 
             // Initialize persistent clipboard (None if unavailable)
             clipboard: arboard::Clipboard::new().ok(),
+
+            // Configuration persistence
+            config,
+            color_mode,
         }
     }
 
@@ -530,6 +550,9 @@ impl App {
                 _ => 20,
             };
         }
+
+        // Save to config (silently ignore errors)
+        let _ = self.config.set_outline_width(self.outline_width);
     }
 
     pub fn jump_to_heading(&mut self, index: usize) {
@@ -601,8 +624,12 @@ impl App {
         };
 
         self.current_theme = new_theme;
-        self.theme = Theme::from_name(new_theme);
+        // Apply color mode when setting theme
+        self.theme = Theme::from_name(new_theme).with_color_mode(self.color_mode);
         self.show_theme_picker = false;
+
+        // Save to config (silently ignore errors)
+        let _ = self.config.set_theme(new_theme);
     }
 
     pub fn copy_content(&mut self) {
@@ -641,8 +668,7 @@ impl App {
             if let Some(clipboard) = &mut self.clipboard {
                 match clipboard.set_text(anchor_link) {
                     Ok(_) => {
-                        self.status_message =
-                            Some(format!("✓ Anchor link copied: #{}", anchor));
+                        self.status_message = Some(format!("✓ Anchor link copied: #{}", anchor));
                     }
                     Err(e) => {
                         self.status_message = Some(format!("✗ Clipboard error: {}", e));
@@ -1050,9 +1076,7 @@ impl App {
         // Restore scroll position (may be adjusted if content changed)
         if current_scroll < self.content_height {
             self.content_scroll = current_scroll;
-            self.content_scroll_state = self
-                .content_scroll_state
-                .position(current_scroll as usize);
+            self.content_scroll_state = self.content_scroll_state.position(current_scroll as usize);
         }
 
         Ok(())

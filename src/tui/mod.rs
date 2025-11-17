@@ -1,14 +1,19 @@
 mod app;
 mod syntax;
-mod theme;
+pub mod terminal_compat;
+pub mod theme;
 mod ui;
 
 pub use app::App;
+pub use terminal_compat::{ColorMode, TerminalCapabilities};
+pub use theme::ThemeName;
 
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::DefaultTerminal;
 use std::io::stdout;
 
@@ -179,9 +184,11 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                                 Ok(_) => {
                                     // Reload file after successful edit
                                     if let Err(e) = app.reload_current_file() {
-                                        app.status_message = Some(format!("✗ Failed to reload: {}", e));
+                                        app.status_message =
+                                            Some(format!("✗ Failed to reload: {}", e));
                                     } else {
-                                        app.status_message = Some("✓ File reloaded after editing".to_string());
+                                        app.status_message =
+                                            Some("✓ File reloaded after editing".to_string());
                                     }
                                     app.update_content_metrics();
                                 }

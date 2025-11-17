@@ -240,7 +240,8 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
         let link_info = if link_count > 0 {
             // Show current link details
-            let current_link = app.selected_link_idx
+            let current_link = app
+                .selected_link_idx
                 .and_then(|idx| app.links_in_view.get(idx));
 
             if let Some(link) = current_link {
@@ -512,15 +513,18 @@ fn render_help_popup(frame: &mut Frame, app: &App, area: Rect) {
             Span::raw("Edit file in default editor ($VISUAL or $EDITOR)"),
         ]),
         Line::from(""),
-        Line::from(vec![Span::styled(
-            "Note: ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ), Span::styled(
-            "On Linux, install a clipboard manager (clipit, parcellite, xclip) for best results",
-            Style::default().fg(Color::Gray),
-        )]),
+        Line::from(vec![
+            Span::styled(
+                "Note: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "On Linux, install a clipboard manager (clipit, parcellite, xclip) for best results",
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
         Line::from(""),
         Line::from(vec![Span::styled(
             "Use j/k or ↓/↑ to scroll | Press Esc or ? to close",
@@ -653,20 +657,11 @@ fn render_link_picker(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    number,
-                    Style::default()
-                        .fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    link_text,
-                    Style::default()
-                        .fg(Color::Gray),
-                ),
+                Span::styled(number, Style::default().fg(Color::DarkGray)),
+                Span::styled(link_text, Style::default().fg(Color::Gray)),
                 Span::styled(
                     format!(" → {}", target_str),
-                    Style::default()
-                        .fg(Color::DarkGray),
+                    Style::default().fg(Color::DarkGray),
                 ),
             ]));
         }
