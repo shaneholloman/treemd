@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2025-11-17
+
+### Added
+
+- **Custom Theme Colors** - Full color customization support via configuration file
+  - Override any color from built-in themes with your own RGB/named/indexed colors
+  - Three color format options: Named ("Cyan"), RGB (`{ rgb = [r, g, b] }`), Indexed (`{ indexed = 235 }`)
+  - All 22 theme colors are customizable: headings, borders, backgrounds, status bar, code blocks, etc.
+  - Color overrides applied before color mode conversion (custom RGB → 256-color on incompatible terminals)
+  - Example configs provided in README for dark blue theme and high contrast accessibility theme
+  - Perfect for personalizing themes or adapting to terminal color schemes
+
+### Fixed
+
+- **Modal Rendering on macOS Terminal.app** - Fixed theme picker, help, and link navigator modals using hardcoded RGB colors
+  - All modal popups now respect the configured color mode (256-color fallback on Terminal.app < macOS 26)
+  - Replaced 69 hardcoded `Color::Rgb()`, `Color::Cyan`, `Color::Yellow`, etc. with theme-aware colors
+  - Added modal color helper methods to Theme struct: `modal_bg()`, `modal_border()`, `modal_title()`, `modal_text()`, etc.
+  - Modal colors automatically converted to 256-color palette on incompatible terminals
+  - Fixes reported issue: "while the colors are better the theme modal isn't rendered right" on macOS Sequoia
+
+### Technical
+
+- **Config structure** (`src/config.rs`)
+  - Added `CustomThemeConfig` struct with 22 optional color fields
+  - Added `ColorValue` enum for flexible color parsing (Named/RGB/Indexed)
+  - Implemented `to_color()` conversion supporting 17 named colors
+  - TOML serialization with `skip_serializing_if` to keep config files clean
+
+- **Theme enhancements** (`src/tui/theme.rs`)
+  - Added `with_custom_colors()` method to apply overrides before color mode conversion
+  - Uses macro for DRY override application across all 22 color fields
+  - Custom colors automatically convert to 256-color mode when needed
+  - Added 8 modal color helper methods that derive from existing theme colors
+  - Modal colors automatically respect `with_color_mode()` transformation
+  - No changes needed to theme definitions - works for all 8 themes
+
+- **App integration** (`src/tui/app.rs`)
+  - Updated initialization to apply custom colors: `Theme::from_name() → with_custom_colors() → with_color_mode()`
+  - Theme switching preserves custom color overrides
+  - Clean separation: base theme → custom → color mode
+
+- **UI modal updates** (`src/tui/ui.rs`)
+  - `render_theme_picker()` - All colors now use `theme.modal_*()` methods
+  - `render_help_popup()` - All 40+ color references updated to use theme methods
+  - `render_link_picker()` - All colors now theme-aware
+  - Consistent modal appearance across all color modes
+
+### Documentation
+
+- **README Configuration section**
+  - Complete guide to custom color configuration
+  - Three example configs (basic, dark blue, high contrast)
+  - All 22 color fields documented with descriptions
+  - Color format examples for all three types
+  - Explains color application order and graceful degradation
+
+### Platform-Specific Notes
+
+- **macOS Sequoia (Darwin 24) with Terminal.app**
+  - Modals now render correctly in 256-color mode
+  - No more RGB color artifacts or rendering glitches
+  - Consistent appearance across all popups
+
+- **All Platforms**
+  - Modal colors automatically adapt to terminal capabilities
+  - Theme switching works properly in modals
+  - Better visual consistency
+  - Custom colors work seamlessly with 256-color fallback
+
 ## [0.2.2] - 2025-11-17
 
 ### Added

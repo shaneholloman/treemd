@@ -239,6 +239,143 @@ Artifacts will be in `target/release-artifacts/`.
 
 **Linux & Windows:** Binaries are provided as-is. These are standard CLI tools that work on all systems.
 
+## Configuration
+
+treemd supports persistent configuration through a TOML file located at:
+- **Linux/Unix**: `~/.config/treemd/config.toml`
+- **macOS**: `~/Library/Application Support/treemd/config.toml`
+- **Windows**: `%APPDATA%\treemd\config.toml`
+
+The configuration file is created automatically when you change settings (like theme selection with `t` or outline width with `[` `]`).
+
+### Basic Configuration
+
+```toml
+[ui]
+theme = "Nord"              # Selected base theme
+outline_width = 30          # Outline panel width (20, 30, or 40)
+
+[terminal]
+color_mode = "auto"         # Color mode: "auto", "rgb", or "256"
+warned_terminal_app = false # Whether Terminal.app warning was shown
+```
+
+### Custom Theme Colors
+
+You can override any color from your selected base theme by adding a `[theme]` section. This is perfect for personalizing your favorite theme or adapting it to your terminal's color scheme.
+
+#### Color Format Options
+
+Colors can be specified in three formats:
+
+1. **Named colors**: `"Red"`, `"Cyan"`, `"White"`, `"DarkGray"`, etc.
+2. **RGB colors**: `{ rgb = [red, green, blue] }` (0-255 for each value)
+3. **Indexed colors**: `{ indexed = 235 }` (0-255 for 256-color palette)
+
+#### Available Color Fields
+
+All color fields are optional—only override what you want to change:
+
+```toml
+[ui]
+theme = "Nord"  # Start with Nord as base
+
+[theme]
+# Override specific colors while keeping the rest from Nord
+background = { rgb = [25, 25, 35] }        # Darker background
+foreground = { rgb = [220, 220, 230] }     # Lighter text
+
+# Headings (5 levels)
+heading_1 = { rgb = [120, 200, 255] }      # Custom cyan
+heading_2 = "LightBlue"                     # Named color
+heading_3 = { indexed = 114 }               # 256-color palette
+heading_4 = "Yellow"
+heading_5 = "Gray"
+
+# Borders and UI elements
+border_focused = "Cyan"                     # Active pane border
+border_unfocused = "DarkGray"               # Inactive pane border
+selection_bg = { rgb = [45, 45, 60] }       # Selection highlight
+selection_fg = "White"
+
+# Status bar
+status_bar_bg = { rgb = [30, 30, 45] }
+status_bar_fg = { rgb = [200, 200, 210] }
+
+# Code styling
+inline_code_fg = { rgb = [255, 200, 100] }  # Inline `code` color
+inline_code_bg = { rgb = [40, 40, 50] }
+code_fence = { rgb = [150, 180, 200] }      # Code block fence
+
+# Text formatting
+bold_fg = "White"
+italic_fg = { rgb = [180, 140, 200] }
+list_bullet = "Cyan"
+
+# Blockquotes
+blockquote_border = { rgb = [100, 100, 120] }
+blockquote_fg = { rgb = [150, 150, 170] }
+```
+
+#### Example: Dark Blue Custom Theme
+
+```toml
+[ui]
+theme = "OceanDark"  # Start with OceanDark
+
+[theme]
+# Make it even darker with more blue tint
+background = { rgb = [15, 18, 25] }
+foreground = { rgb = [200, 210, 220] }
+heading_1 = { rgb = [80, 180, 255] }
+heading_2 = { rgb = [100, 200, 255] }
+heading_3 = { rgb = [120, 220, 255] }
+selection_bg = { rgb = [30, 35, 50] }
+border_focused = { rgb = [80, 180, 255] }
+```
+
+#### Example: High Contrast
+
+```toml
+[ui]
+theme = "Dracula"
+
+[theme]
+# Maximize contrast for accessibility
+background = { rgb = [0, 0, 0] }
+foreground = { rgb = [255, 255, 255] }
+heading_1 = { rgb = [0, 255, 255] }       # Bright cyan
+heading_2 = { rgb = [255, 255, 0] }       # Bright yellow
+heading_3 = { rgb = [0, 255, 0] }         # Bright green
+border_focused = { rgb = [255, 0, 255] }  # Bright magenta
+selection_bg = { rgb = [50, 50, 50] }
+selection_fg = { rgb = [255, 255, 255] }
+```
+
+#### Color Application Order
+
+Colors are applied in this order:
+1. **Base theme** - One of 8 built-in themes (OceanDark, Nord, Dracula, etc.)
+2. **Custom overrides** - Your `[theme]` section colors (optional)
+3. **Color mode conversion** - Automatic RGB → 256-color on incompatible terminals
+
+This means your custom RGB colors will automatically degrade gracefully on terminals that don't support true color.
+
+### CLI Overrides
+
+You can override settings for a single session using command-line flags:
+
+```bash
+# Use a different theme for this session
+treemd --theme Dracula README.md
+
+# Force 256-color mode (useful for testing or screenshots)
+treemd --color-mode 256 README.md
+
+# Force RGB mode (override terminal detection)
+treemd --color-mode rgb README.md
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
