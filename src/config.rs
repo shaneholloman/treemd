@@ -1,4 +1,5 @@
 use crate::tui::theme::ThemeName;
+use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -10,6 +11,9 @@ pub struct Config {
 
     #[serde(default)]
     pub terminal: TerminalConfig,
+
+    #[serde(default)]
+    pub theme: CustomThemeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,11 +34,100 @@ pub struct TerminalConfig {
     pub warned_terminal_app: bool,
 }
 
+/// Custom theme color overrides
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CustomThemeConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_1: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_2: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_3: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_4: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_5: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_focused: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_unfocused: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_bg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_fg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_bar_bg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_bar_fg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_code_fg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inline_code_bg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bold_fg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub italic_fg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_bullet: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blockquote_border: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blockquote_fg: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_fence: Option<ColorValue>,
+}
+
+/// Color value that can be specified in multiple formats
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ColorValue {
+    /// Named color (e.g., "Red", "Cyan", "White")
+    Named(String),
+    /// RGB color { rgb = [r, g, b] }
+    Rgb { rgb: [u8; 3] },
+    /// Indexed color { indexed = 235 }
+    Indexed { indexed: u8 },
+}
+
+impl ColorValue {
+    /// Convert to ratatui Color
+    pub fn to_color(&self) -> Option<Color> {
+        match self {
+            ColorValue::Named(name) => match name.to_lowercase().as_str() {
+                "black" => Some(Color::Black),
+                "red" => Some(Color::Red),
+                "green" => Some(Color::Green),
+                "yellow" => Some(Color::Yellow),
+                "blue" => Some(Color::Blue),
+                "magenta" => Some(Color::Magenta),
+                "cyan" => Some(Color::Cyan),
+                "gray" | "grey" => Some(Color::Gray),
+                "darkgray" | "darkgrey" => Some(Color::DarkGray),
+                "lightred" => Some(Color::LightRed),
+                "lightgreen" => Some(Color::LightGreen),
+                "lightyellow" => Some(Color::LightYellow),
+                "lightblue" => Some(Color::LightBlue),
+                "lightmagenta" => Some(Color::LightMagenta),
+                "lightcyan" => Some(Color::LightCyan),
+                "white" => Some(Color::White),
+                _ => None,
+            },
+            ColorValue::Rgb { rgb } => Some(Color::Rgb(rgb[0], rgb[1], rgb[2])),
+            ColorValue::Indexed { indexed } => Some(Color::Indexed(*indexed)),
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             ui: UiConfig::default(),
             terminal: TerminalConfig::default(),
+            theme: CustomThemeConfig::default(),
         }
     }
 }
