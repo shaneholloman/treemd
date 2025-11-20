@@ -5,6 +5,120 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-11-20
+
+### Added
+
+- **Interactive Element Navigation System** - Complete system for navigating and interacting with markdown elements
+  - Press `i` to enter interactive mode and navigate all interactive elements
+  - Interactive element types: Details blocks, Links, Checkboxes, Code blocks, Tables, and Images
+  - Navigate with Tab/Shift+Tab, j/k, or Up/Down arrow keys
+  - Auto-scroll to keep selected element in viewport
+  - Element-specific actions (expand details, follow links, toggle checkboxes, copy code/images)
+  - Visual selection indicator (→ arrow) for current element
+  - Status bar guidance showing available actions for each element type
+
+- **Details/Collapsible Blocks** - HTML `<details>` element support in markdown
+  - `<details><summary>Title</summary>Content</details>` now renders as expandable sections
+  - Collapsible blocks with expand/collapse indicators (▼/▶)
+  - Nested content support within details blocks
+  - Toggle expansion with Enter key in interactive mode
+  - Automatic re-indexing when expansion state changes
+
+- **Interactive Table Editing and Navigation**
+  - Press Enter on a table in interactive mode to enter table navigation
+  - Navigate cells with h/j/k/l or arrow keys
+  - Copy individual cell with `y`, entire row with `Y`, full table with `r`
+  - Edit cell values with Enter key - inline editor with Esc to cancel
+  - Cell position shown in status bar: `[TABLE] Cell(row,col)`
+  - Save edited cells directly to file with automatic reload
+
+- **Enhanced Interactive Element Interactions**
+  - Details blocks: Press Enter to toggle expand/collapse
+  - Links: Press Enter to follow, works with all link types (anchors, relative files, wikilinks, external URLs)
+  - Checkboxes: Press Space to toggle, saves to file automatically
+  - Code blocks: Press y to copy code to clipboard
+  - Images: Press y to copy image path, i to view image info
+  - Full keyboard support for all interactive operations
+
+### Technical
+
+- **New Interactive Module** (`src/tui/interactive.rs` - 614 lines)
+  - `InteractiveState` struct for managing interactive elements
+  - `ElementId` and `ElementType` enums for element identification
+  - `DetailMode` enum for fine-grained navigation (tables, lists)
+  - Element indexing from parsed blocks
+  - Navigation methods: next(), previous(), enter(), exit()
+  - Table-specific navigation: table_move_up/down/left/right()
+  - Cell and row retrieval: get_table_cell(), get_table_row()
+  - Status text generation for UI feedback
+
+- **Parser Enhancement** (`src/parser/content.rs`)
+  - `extract_details_blocks()` for preprocessing `<details>` HTML
+  - Recursive parsing of nested content within details blocks
+  - Placeholder-based approach for proper block structure integration
+  - `Block::Details` variant with summary and nested blocks
+
+- **App State Integration** (`src/tui/app.rs`)
+  - `interactive_state: InteractiveState` field
+  - `AppMode::Interactive` and `AppMode::CellEdit` modes
+  - `enter_interactive_mode()` - Index elements and begin navigation
+  - `exit_interactive_mode()` - Return to normal mode
+  - `activate_interactive_element()` - Dispatch to element-specific handlers
+  - Cell edit state: `cell_edit_value`, `cell_edit_row`, `cell_edit_col`
+  - `enter_cell_edit_mode()` and `save_edited_cell()` for table editing
+  - `reindex_interactive_elements()` after state changes
+  - `copy_table_cell()`, `copy_table_row()`, `copy_table_markdown()`
+  - `scroll_to_interactive_element()` for auto-scroll to viewport
+
+- **Event Handling** (`src/tui/mod.rs`)
+  - Interactive mode key bindings: Tab, j/k, Up/Down, Enter, Space, y, Esc
+  - Table navigation mode: h/j/k/l, y/Y/r for copying, Enter for edit
+  - Cell edit mode: Character input, Backspace for delete, Enter to save, Esc to cancel
+  - Mode-specific status message updates
+  - Integration with existing help, search, and link follow modes
+
+- **Rendering Enhancement** (`src/tui/ui.rs`)
+  - `render_markdown_enhanced()` updated for interactive elements
+  - Details block rendering with expand/collapse indicators
+  - Interactive element selection highlighting
+  - Table cell highlighting during edit mode
+  - Cell edit overlay popup
+  - Status text reflecting interactive mode state
+  - Support for rendering nested blocks within details
+
+- **File I/O for Table Editing**
+  - `replace_table_cell_in_markdown()` - Find and update cells in markdown
+  - `replace_table_cell_in_file()` - Locate target table in file
+  - `replace_cell_in_row()` - Parse and modify individual cells
+  - Automatic document reload after table edits
+  - State preservation after interactive changes
+
+### Changed
+
+- **Keyboard Shortcuts** - New keybinding `i` for interactive mode
+  - `i` - Enter interactive element navigation mode
+  - In interactive mode: Tab, j/k, Up/Down to navigate
+  - Element-specific actions: Enter, Space, y, r to interact
+
+- **App Rendering** - Enhanced UI for interactive state
+  - Title bar, outline, content, and status all reflect interactive mode
+  - Selection indicators on all element types
+  - Table cells highlight in edit mode
+  - Status bar shows element-specific guidance
+
+- **Documentation Updates**
+  - Help screen includes new interactive mode section
+  - Keybinding reference updated with interactive shortcuts
+  - Cell editing workflow documented
+
+### Platform-Specific Notes
+
+- **All Platforms**
+  - Interactive navigation works identically across OS
+  - Table editing saves directly to file with cross-platform paths
+  - Status messages provide consistent feedback
+
 ## [0.2.3] - 2025-11-17
 
 ### Added
