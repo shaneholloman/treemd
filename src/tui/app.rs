@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::parser::{Document, HeadingNode, Link, extract_links};
+use crate::tui::interactive::InteractiveState;
 use crate::tui::syntax::SyntaxHighlighter;
 use crate::tui::terminal_compat::ColorMode;
 use crate::tui::theme::{Theme, ThemeName};
@@ -16,10 +17,12 @@ pub enum Focus {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AppMode {
     Normal,
+    Interactive,
     LinkFollow,
     Search,
     ThemePicker,
     Help,
+    CellEdit,
 }
 
 pub struct App {
@@ -56,6 +59,14 @@ pub struct App {
     pub file_history: Vec<FileState>, // Back navigation stack
     pub file_future: Vec<FileState>, // Forward navigation stack (for undo back)
     pub status_message: Option<String>, // Temporary status message to display
+
+    // Interactive element navigation
+    pub interactive_state: InteractiveState,
+
+    // Cell editing state
+    pub cell_edit_value: String, // Current value being edited
+    pub cell_edit_row: usize,    // Row being edited
+    pub cell_edit_col: usize,    // Column being edited
 
     // Persistent clipboard for Linux X11 compatibility
     // On Linux, the clipboard instance must stay alive to serve paste requests
@@ -147,6 +158,14 @@ impl App {
             file_history: Vec::new(),
             file_future: Vec::new(),
             status_message: None,
+
+            // Interactive element navigation
+            interactive_state: InteractiveState::new(),
+
+            // Cell editing state
+            cell_edit_value: String::new(),
+            cell_edit_row: 0,
+            cell_edit_col: 0,
 
             // Initialize persistent clipboard (None if unavailable)
             clipboard: arboard::Clipboard::new().ok(),
@@ -399,6 +418,36 @@ impl App {
     pub fn scroll_page_up(&mut self) {
         if self.focus == Focus::Content {
             self.content_scroll = self.content_scroll.saturating_sub(10);
+            self.content_scroll_state = self
+                .content_scroll_state
+                .position(self.content_scroll as usize);
+        }
+    }
+
+    /// Auto-scroll to keep the selected interactive element in view
+    /// viewport_height: height of the visible content area (in lines)
+    pub fn scroll_to_interactive_element(&mut self, viewport_height: u16) {
+        if let Some((start_line, end_line)) = self.interactive_state.current_element_line_range() {
+            let start = start_line as u16;
+            let end = end_line as u16;
+            let scroll = self.content_scroll;
+            let viewport_end = scroll + viewport_height;
+
+            // Element is above viewport - scroll up to show it
+            if start < scroll {
+                self.content_scroll = start;
+            }
+            // Element is below viewport - scroll down to show it
+            else if end > viewport_end {
+                // Try to position element at top of viewport
+                self.content_scroll = start.min(self.content_height.saturating_sub(viewport_height));
+            }
+            // Element partially visible at bottom - ensure fully visible
+            else if start >= scroll && end > viewport_end {
+                self.content_scroll = end.saturating_sub(viewport_height);
+            }
+
+            // Update scrollbar state
             self.content_scroll_state = self
                 .content_scroll_state
                 .position(self.content_scroll as usize);
@@ -1084,5 +1133,554 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Enter interactive mode - build element index and enter mode
+    pub fn enter_interactive_mode(&mut self) {
+        // Get current section content to index
+        let content = if let Some(selected) = self.selected_heading_text() {
+            self.document
+                .extract_section(&selected)
+                .unwrap_or_else(|| self.document.content.clone())
+        } else {
+            self.document.content.clone()
+        };
+
+        // Parse content into blocks
+        use crate::parser::content::parse_content;
+        let blocks = parse_content(&content, 0);
+
+        // Index interactive elements
+        self.interactive_state.index_elements(&blocks);
+
+        // Enter interactive mode
+        self.interactive_state.enter();
+        self.mode = AppMode::Interactive;
+
+        // Auto-scroll to show first element
+        self.scroll_to_interactive_element(20);
+
+        // Set status message
+        if self.interactive_state.elements.is_empty() {
+            self.status_message = Some("⚠ No interactive elements in this section".to_string());
+        } else {
+            self.status_message = Some(format!(
+                "✓ Interactive mode: {} elements found (Tab to cycle)",
+                self.interactive_state.elements.len()
+            ));
+        }
+    }
+
+    /// Exit interactive mode and return to normal
+    pub fn exit_interactive_mode(&mut self) {
+        self.interactive_state.exit();
+        self.mode = AppMode::Normal;
+        self.status_message = None;
+    }
+
+    /// Get the currently selected interactive element
+    pub fn get_selected_interactive_element(
+        &self,
+    ) -> Option<&crate::tui::interactive::InteractiveElement> {
+        self.interactive_state.current_element()
+    }
+
+    /// Activate the currently selected interactive element
+    pub fn activate_interactive_element(&mut self) -> Result<(), String> {
+        use crate::tui::interactive::ElementType;
+
+        let element = match self.interactive_state.current_element() {
+            Some(elem) => elem.clone(),
+            None => return Err("No element selected".to_string()),
+        };
+
+        match &element.element_type {
+            ElementType::Details { .. } => {
+                // Toggle details expansion
+                self.interactive_state.toggle_details(element.id);
+
+                // Re-index elements since expanded state changed content
+                self.reindex_interactive_elements();
+
+                self.status_message = Some("✓ Toggled details".to_string());
+                Ok(())
+            }
+            ElementType::Checkbox {
+                checked,
+                block_idx,
+                item_idx,
+                ..
+            } => {
+                // Toggle checkbox and save to file
+                self.toggle_checkbox_and_save(*block_idx, *item_idx, *checked)?;
+                Ok(())
+            }
+            ElementType::Link { link, .. } => {
+                // Follow link using existing link follow logic
+                self.follow_link_from_interactive(&link.clone())?;
+                Ok(())
+            }
+            ElementType::CodeBlock { content, .. } => {
+                // Copy code to clipboard
+                self.copy_to_clipboard(content)?;
+                self.status_message = Some("✓ Code copied to clipboard".to_string());
+                Ok(())
+            }
+            ElementType::Image { src, alt, .. } => {
+                // Copy image path to clipboard
+                self.copy_to_clipboard(src)?;
+                self.status_message = Some(format!("✓ Image path copied: {}", alt));
+                Ok(())
+            }
+            ElementType::Table { rows, cols, .. } => {
+                // Enter table navigation mode
+                if let Err(e) = self.interactive_state.enter_table_mode() {
+                    return Err(e);
+                }
+                self.status_message = Some(self.interactive_state.table_status_text(rows + 1, *cols));
+                Ok(())
+            }
+        }
+    }
+
+    /// Re-index interactive elements after state changes
+    fn reindex_interactive_elements(&mut self) {
+        let content = if let Some(selected) = self.selected_heading_text() {
+            self.document
+                .extract_section(&selected)
+                .unwrap_or_else(|| self.document.content.clone())
+        } else {
+            self.document.content.clone()
+        };
+
+        use crate::parser::content::parse_content;
+        let blocks = parse_content(&content, 0);
+        self.interactive_state.index_elements(&blocks);
+    }
+
+    /// Toggle a checkbox and save changes to the file
+    fn toggle_checkbox_and_save(
+        &mut self,
+        block_idx: usize,
+        item_idx: usize,
+        checked: bool,
+    ) -> Result<(), String> {
+        // Get the checkbox content text to use as identifier
+        let checkbox_content = {
+            let content = if let Some(selected) = self.selected_heading_text() {
+                self.document.extract_section(&selected).unwrap_or_else(|| self.document.content.clone())
+            } else {
+                self.document.content.clone()
+            };
+
+            use crate::parser::content::parse_content;
+            let blocks = parse_content(&content, 0);
+
+            if let Some(block) = blocks.get(block_idx) {
+                if let crate::parser::output::Block::List { items, .. } = block {
+                    if let Some(item) = items.get(item_idx) {
+                        Some(item.content.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        let checkbox_content = checkbox_content.ok_or_else(|| "Could not find checkbox content".to_string())?;
+
+        // Read the current file
+        let file_content = std::fs::read_to_string(&self.current_file_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+
+        // Find and toggle the checkbox in the file content
+        let new_content =
+            self.toggle_checkbox_by_content(&file_content, &checkbox_content, checked)?;
+
+        // Write back to file
+        std::fs::write(&self.current_file_path, &new_content)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+
+        // Reload the document
+        self.reload_current_file()?;
+
+        // Re-index interactive elements
+        self.reindex_interactive_elements();
+
+        let new_state = if checked { "unchecked" } else { "checked" };
+        self.status_message = Some(format!("✓ Checkbox {} and saved", new_state));
+
+        Ok(())
+    }
+
+    /// Toggle a checkbox in markdown content by matching the content text
+    fn toggle_checkbox_by_content(
+        &self,
+        file_content: &str,
+        checkbox_text: &str,
+        current_checked: bool,
+    ) -> Result<String, String> {
+        let lines: Vec<&str> = file_content.lines().collect();
+        let mut result = Vec::new();
+        let mut found = false;
+
+        // Clean the checkbox text to match (remove any checkbox markers if present)
+        let clean_text = checkbox_text
+            .trim_start()
+            .trim_start_matches("[x]")
+            .trim_start_matches("[X]")
+            .trim_start_matches("[ ]")
+            .trim();
+
+        for line in lines {
+            let trimmed = line.trim_start();
+
+            // Check if this is a checkbox line
+            if (trimmed.starts_with("- [ ]") || trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]"))
+                && !found
+            {
+                // Extract the text after the checkbox marker
+                let line_text = trimmed
+                    .trim_start_matches("- [ ]")
+                    .trim_start_matches("- [x]")
+                    .trim_start_matches("- [X]")
+                    .trim();
+
+                // Check if this matches our target checkbox
+                if line_text == clean_text {
+                    // Toggle the checkbox
+                    let new_line = if current_checked {
+                        // Change [x] or [X] to [ ]
+                        line.replacen("[x]", "[ ]", 1).replacen("[X]", "[ ]", 1)
+                    } else {
+                        // Change [ ] to [x]
+                        line.replacen("[ ]", "[x]", 1)
+                    };
+                    result.push(new_line);
+                    found = true;
+                } else {
+                    result.push(line.to_string());
+                }
+            } else {
+                result.push(line.to_string());
+            }
+        }
+
+        if !found {
+            return Err(format!("Checkbox not found in file: '{}'", clean_text));
+        }
+
+        Ok(result.join("\n") + "\n")
+    }
+
+    /// Follow a link from interactive mode
+    fn follow_link_from_interactive(&mut self, link: &crate::parser::Link) -> Result<(), String> {
+        use crate::parser::LinkTarget;
+
+        match &link.target {
+            LinkTarget::Anchor(anchor) => {
+                // Jump to heading in current document
+                self.select_by_text(anchor);
+                self.exit_interactive_mode();
+                Ok(())
+            }
+            LinkTarget::RelativeFile { path, anchor } => {
+                // Load the linked file
+                self.load_file(path, anchor.as_deref())?;
+                self.exit_interactive_mode();
+                Ok(())
+            }
+            LinkTarget::WikiLink { target, .. } => {
+                // Try to find and load the wikilinked file
+                self.load_wikilink(target)?;
+                self.exit_interactive_mode();
+                Ok(())
+            }
+            LinkTarget::External(url) => {
+                // Open external URL in browser
+                #[cfg(target_os = "macos")]
+                let open_cmd = "open";
+                #[cfg(target_os = "linux")]
+                let open_cmd = "xdg-open";
+                #[cfg(target_os = "windows")]
+                let open_cmd = "start";
+
+                std::process::Command::new(open_cmd)
+                    .arg(url)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open URL: {}", e))?;
+
+                self.status_message = Some(format!("✓ Opened {}", url));
+                Ok(())
+            }
+        }
+    }
+
+    /// Copy text to clipboard
+    fn copy_to_clipboard(&mut self, text: &str) -> Result<(), String> {
+        if let Some(clipboard) = &mut self.clipboard {
+            clipboard
+                .set_text(text.to_string())
+                .map_err(|e| format!("Clipboard error: {}", e))?;
+            Ok(())
+        } else {
+            Err("Clipboard not available".to_string())
+        }
+    }
+
+    /// Get table data for current interactive element
+    fn get_current_table_data(&self) -> Option<(Vec<String>, Vec<Vec<String>>)> {
+        if let Some(element) = self.interactive_state.current_element() {
+            if let crate::tui::interactive::ElementType::Table { block_idx, .. } = &element.element_type {
+                // Parse current section to get table data
+                let content = if let Some(selected) = self.selected_heading_text() {
+                    self.document.extract_section(&selected).unwrap_or_else(|| self.document.content.clone())
+                } else {
+                    self.document.content.clone()
+                };
+
+                use crate::parser::content::parse_content;
+                let blocks = parse_content(&content, 0);
+
+                if let Some(block) = blocks.get(*block_idx) {
+                    if let crate::parser::output::Block::Table { headers, rows, .. } = block {
+                        return Some((headers.clone(), rows.clone()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Copy table cell to clipboard
+    pub fn copy_table_cell(&mut self) -> Result<(), String> {
+        if let Some((headers, rows)) = self.get_current_table_data() {
+            if let Some(cell) = self.interactive_state.get_table_cell(&headers, &rows) {
+                self.copy_to_clipboard(&cell)?;
+                self.status_message = Some(format!("✓ Cell copied: {}", cell));
+                return Ok(());
+            }
+        }
+        Err("No cell selected".to_string())
+    }
+
+    /// Copy table row to clipboard (tab-separated)
+    pub fn copy_table_row(&mut self) -> Result<(), String> {
+        if let Some((headers, rows)) = self.get_current_table_data() {
+            if let Some(row) = self.interactive_state.get_table_row(&headers, &rows) {
+                let row_text = row.join("\t");
+                self.copy_to_clipboard(&row_text)?;
+                self.status_message = Some("✓ Row copied (tab-separated)".to_string());
+                return Ok(());
+            }
+        }
+        Err("No row selected".to_string())
+    }
+
+    /// Copy entire table as markdown
+    pub fn copy_table_markdown(&mut self) -> Result<(), String> {
+        if let Some((headers, rows)) = self.get_current_table_data() {
+            let mut table_md = String::new();
+
+            // Header row
+            table_md.push_str("| ");
+            table_md.push_str(&headers.join(" | "));
+            table_md.push_str(" |\n");
+
+            // Separator row
+            table_md.push_str("| ");
+            table_md.push_str(&vec!["---"; headers.len()].join(" | "));
+            table_md.push_str(" |\n");
+
+            // Data rows
+            for row in &rows {
+                table_md.push_str("| ");
+                table_md.push_str(&row.join(" | "));
+                table_md.push_str(" |\n");
+            }
+
+            self.copy_to_clipboard(&table_md)?;
+            self.status_message = Some("✓ Table copied as markdown".to_string());
+            Ok(())
+        } else {
+            Err("No table data available".to_string())
+        }
+    }
+
+    /// Enter cell edit mode for the currently selected table cell
+    pub fn enter_cell_edit_mode(&mut self) -> Result<(), String> {
+        if let Some((headers, rows)) = self.get_current_table_data() {
+            if let Some((row, col)) = self.interactive_state.get_table_position() {
+                // Get current cell value
+                let cell_value = if row == 0 {
+                    // Header row
+                    headers.get(col).cloned().unwrap_or_default()
+                } else {
+                    // Data row
+                    rows.get(row - 1)
+                        .and_then(|r| r.get(col))
+                        .cloned()
+                        .unwrap_or_default()
+                };
+
+                self.cell_edit_value = cell_value;
+                self.cell_edit_row = row;
+                self.cell_edit_col = col;
+                self.mode = AppMode::CellEdit;
+                return Ok(());
+            }
+        }
+        Err("No cell selected for editing".to_string())
+    }
+
+    /// Save the edited cell value back to the file
+    pub fn save_edited_cell(&mut self) -> Result<(), String> {
+        use std::fs;
+
+        // Read the current file
+        let file_content = fs::read_to_string(&self.current_file_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+
+        // Find and replace the table cell in the markdown
+        let new_content = self.replace_table_cell_in_markdown(
+            &file_content,
+            self.cell_edit_row,
+            self.cell_edit_col,
+            &self.cell_edit_value,
+        )?;
+
+        // Write back to file
+        fs::write(&self.current_file_path, new_content)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+
+        // Reload the document
+        let updated_document = crate::parser::parse_file(&self.current_file_path)
+            .map_err(|e| format!("Failed to reload document: {}", e))?;
+
+        self.document = updated_document;
+        self.status_message = Some("✓ Cell updated".to_string());
+        Ok(())
+    }
+
+    /// Replace a specific table cell in markdown content
+    fn replace_table_cell_in_markdown(
+        &self,
+        content: &str,
+        row: usize,
+        col: usize,
+        new_value: &str,
+    ) -> Result<String, String> {
+        use crate::parser::content::parse_content;
+
+        // Get the current section content to find the right table
+        let section_content = if let Some(heading_text) = self.selected_heading_text() {
+            self.document
+                .extract_section(heading_text)
+                .unwrap_or_else(|| self.document.content.clone())
+        } else {
+            self.document.content.clone()
+        };
+
+        // Parse to find the table block
+        let blocks = parse_content(&section_content, 0);
+
+        // Find the block index of the current table element
+        if let Some(element) = self.interactive_state.current_element() {
+            let block_idx = element.id.block_idx;
+
+            if let Some(block) = blocks.get(block_idx) {
+                if let crate::parser::output::Block::Table { .. } = block {
+                    // Find this table in the full file content
+                    return self.replace_table_cell_in_file(content, row, col, new_value);
+                }
+            }
+        }
+
+        Err("Could not locate table in file".to_string())
+    }
+
+    /// Find and replace a cell in the first table found in the current section
+    fn replace_table_cell_in_file(
+        &self,
+        content: &str,
+        row: usize,
+        col: usize,
+        new_value: &str,
+    ) -> Result<String, String> {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut result = Vec::new();
+        let mut in_table = false;
+        let mut table_row_idx = 0;
+        let mut found_table = false;
+
+        for line in lines {
+            let trimmed = line.trim();
+
+            // Detect table start (line starting with |)
+            if trimmed.starts_with('|') && trimmed.ends_with('|') {
+                if !in_table {
+                    in_table = true;
+                    found_table = true;
+                    table_row_idx = 0;
+                }
+
+                // Skip separator rows (| --- | --- |)
+                if trimmed.contains("---") {
+                    result.push(line.to_string());
+                    continue;
+                }
+
+                // This is a data row in the table
+                if table_row_idx == row {
+                    // Replace this row's cell
+                    let new_line = self.replace_cell_in_row(line, col, new_value);
+                    result.push(new_line);
+                    in_table = false; // Stop after modifying the target row
+                } else {
+                    result.push(line.to_string());
+                }
+
+                table_row_idx += 1;
+            } else {
+                if in_table {
+                    in_table = false;
+                }
+                result.push(line.to_string());
+            }
+        }
+
+        if found_table {
+            Ok(result.join("\n"))
+        } else {
+            Err("Table not found in file".to_string())
+        }
+    }
+
+    /// Replace a specific cell in a table row line
+    fn replace_cell_in_row(&self, line: &str, col: usize, new_value: &str) -> String {
+        // Split by | and reconstruct
+        let parts: Vec<&str> = line.split('|').collect();
+
+        // Table format: | cell0 | cell1 | cell2 |
+        // After split: ["", " cell0 ", " cell1 ", " cell2 ", ""]
+        let mut new_parts = Vec::new();
+
+        for (i, part) in parts.iter().enumerate() {
+            if i == 0 || i == parts.len() - 1 {
+                // Keep empty parts at start/end
+                new_parts.push(part.to_string());
+            } else if i - 1 == col {
+                // This is the cell to replace (accounting for leading empty part)
+                new_parts.push(format!(" {} ", new_value));
+            } else {
+                new_parts.push(part.to_string());
+            }
+        }
+
+        new_parts.join("|")
     }
 }
