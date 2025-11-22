@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2025-11-22
+
+### Fixed
+
+- **BSD and Unix Platform Support** - Fixed compilation error on NetBSD and other BSD systems
+  - External URL opening now supports all Unix-like platforms (NetBSD, FreeBSD, OpenBSD, etc.)
+  - Platform detection changed from explicit Linux-only to fallback for all non-macOS/Windows systems
+  - All BSD variants now use `xdg-open` command for opening external links
+  - Resolves compilation error: "cannot find value `open_cmd` in this scope"
+
+### Technical
+
+- **Platform Detection** (`src/tui/app.rs:1402-1407`)
+  - Changed from OS-specific `#[cfg(target_os = "linux")]` to inclusive `#[cfg(not(any(target_os = "macos", target_os = "windows")))]`
+  - macOS continues to use `open` command
+  - Windows continues to use `start` command
+  - All other Unix-like systems (Linux, *BSD, etc.) use `xdg-open`
+
+### Platform-Specific Notes
+
+- **BSD Systems (NetBSD, FreeBSD, OpenBSD)**
+  - External links now open correctly in default browser
+  - Full compilation support without errors
+  - NetBSD tested by contributor @0323pin
+
+- **All Platforms**
+  - No functional changes for existing macOS, Windows, or Linux users
+  - More robust platform detection for edge cases
+
 ## [0.3.1] - 2025-11-21
 
 ### Fixed
