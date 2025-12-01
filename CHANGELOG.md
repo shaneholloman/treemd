@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2025-12-01
+
+### Fixed
+
+- **Config file `color_mode` setting ignored** - The `color_mode` setting in `config.toml` is now properly respected ([#5](https://github.com/Epistates/treemd/issues/5))
+  - Priority order: CLI flags > config file > auto-detection
+  - Set `color_mode = "rgb"` or `color_mode = "256"` in config to override auto-detection
+  - `color_mode = "auto"` (default) uses improved auto-detection
+
+- **RGB auto-detection fails for truecolor terminals** - Improved terminal color detection for Kitty, Alacritty, WezTerm, and other RGB-capable terminals ([#5](https://github.com/Epistates/treemd/issues/5))
+  - Now checks `COLORTERM` environment variable for `truecolor` or `24bit` (primary standard per [termstandard/colors](https://github.com/termstandard/colors))
+  - Checks `TERM` for known truecolor terminals (`kitty`, `alacritty`, `wezterm`) and suffixes (`-truecolor`, `-direct`)
+  - Checks `TERM_PROGRAM` for known apps (iTerm, Kitty, VS Code, Hyper, etc.)
+  - Falls back to `supports_color` crate detection
+
+### Technical
+
+- **Enhanced color detection** (`src/tui/terminal_compat.rs`)
+  - New `detect_truecolor_support()` method with multi-method detection
+  - Environment variable checks before crate-based detection
+  - Better compatibility with terminals that set `COLORTERM=truecolor`
+
+- **Config priority in main** (`src/main.rs`)
+  - Color mode selection now checks config file before auto-detection
+  - Clear priority: CLI args (highest) > config file > auto-detection (lowest)
+
 ## [0.4.0] - 2025-11-30
 
 ### Added
