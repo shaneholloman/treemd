@@ -901,6 +901,15 @@ fn render_inline_elements(
                 spans.push(Span::styled(value.clone(), theme.inline_code_style()));
             }
             InlineElement::Link { text, .. } => {
+                if is_selected {
+                    // Add selection indicator before selected link
+                    spans.push(Span::styled(
+                        "▸ ",
+                        Style::default()
+                            .fg(Color::Rgb(100, 200, 255))
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
                 let style = if is_selected {
                     // Highlighted selected link - matches table cell selection style
                     Style::default()
@@ -924,6 +933,15 @@ fn render_inline_elements(
                 ));
             }
             InlineElement::Image { alt, .. } => {
+                if is_selected {
+                    // Add selection indicator before selected image
+                    spans.push(Span::styled(
+                        "▸ ",
+                        Style::default()
+                            .fg(Color::Rgb(100, 200, 255))
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
                 let style = if is_selected {
                     // Highlighted selected image
                     Style::default()
