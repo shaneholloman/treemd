@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.2] - 2025-12-02
+## [0.4.3] - 2025-12-03
 
 ### Added
 
@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All 8 themes now include appropriate colors for these new fields (both RGB and 256-color variants)
   - Users can now customize title bar, scrollbars, selection indicators, links, and table borders via config file
   - Consistent theming across all UI elements
+
+### Fixed
+
+- **Search bar overlapping filtered outline results** - Search bar no longer overlaps the outline when filtering headings ([PR #14](https://github.com/Epistates/treemd/pull/14))
+- **Content panes overlapping status bar** - Fixed layout issue where content panes could overlap the status bar ([PR #13](https://github.com/Epistates/treemd/pull/13))
+
+### Refactored
+
+- **Layout builder** - Replaced string-based section IDs with `Section` enum for type-safe layout management
+
+## [0.4.2] - 2025-12-02
 
 ### Fixed
 
@@ -34,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - List items now properly contain their nested code blocks, blockquotes, and other block elements
   - Parser correctly associates indented blocks with their parent list items
   - Renderer handles nested block rendering within list item context
+
+- **Interactive mode toggle** - Pressing `i` now correctly toggles out of interactive mode (previously only entered it)
 
 ### Changed
 
