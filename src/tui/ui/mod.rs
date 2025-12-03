@@ -3,7 +3,7 @@ mod popups;
 mod table;
 mod util;
 
-use layout::DynamicLayout;
+use layout::{DynamicLayout, Section};
 
 use crate::tui::app::{App, Focus};
 use crate::tui::theme::Theme;
@@ -26,22 +26,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Create dynamic main layout
     let main_layout = DynamicLayout::vertical(area)
-        .section("title", Constraint::Length(2))
-        .section_if(app.show_search, "search", Constraint::Length(3))
-        .section("content", Constraint::Min(0))
-        .section("status", Constraint::Length(1))
+        .section(Section::Title, Constraint::Length(2))
+        .section_if(app.show_search, Section::Search, Constraint::Length(3))
+        .section(Section::Content, Constraint::Min(0))
+        .section(Section::Status, Constraint::Length(1))
         .build();
 
     // Render title bar
-    render_title_bar(frame, app, main_layout.require("title"));
+    render_title_bar(frame, app, main_layout.require(Section::Title));
 
     // Render search bar if visible
-    if let Some(search_area) = main_layout.get("search") {
+    if let Some(search_area) = main_layout.get(Section::Search) {
         render_search_bar(frame, app, search_area);
     }
 
     // Create horizontal layout for outline and content (conditional based on outline visibility)
-    let content_area = main_layout.require("content");
+    let content_area = main_layout.require(Section::Content);
     let content_chunks = if app.show_outline {
         let content_width = 100 - app.outline_width;
         Layout::horizontal([
@@ -65,7 +65,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // Render status bar at bottom
-    render_status_bar(frame, app, main_layout.require("status"));
+    render_status_bar(frame, app, main_layout.require(Section::Status));
 
     // Render help popup if shown
     if app.show_help {

@@ -6,9 +6,18 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use std::collections::HashMap;
 
+/// Section identifiers for layout areas
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Section {
+    Title,
+    Search,
+    Content,
+    Status,
+}
+
 /// A dynamic layout that maps section IDs to their rendered areas
 pub struct DynamicLayout {
-    areas: HashMap<&'static str, Rect>,
+    areas: HashMap<Section, Rect>,
 }
 
 impl DynamicLayout {
@@ -17,23 +26,17 @@ impl DynamicLayout {
         DynamicLayoutBuilder::new(area, Direction::Vertical)
     }
 
-    /// Start building a horizontal layout
-    #[allow(dead_code)]
-    pub fn horizontal(area: Rect) -> DynamicLayoutBuilder {
-        DynamicLayoutBuilder::new(area, Direction::Horizontal)
-    }
-
     /// Get the area for a section by ID
-    pub fn get(&self, id: &str) -> Option<Rect> {
-        self.areas.get(id).copied()
+    pub fn get(&self, id: Section) -> Option<Rect> {
+        self.areas.get(&id).copied()
     }
 
     /// Get the area for a section, panicking if not found (use when section is always visible)
-    pub fn require(&self, id: &str) -> Rect {
+    pub fn require(&self, id: Section) -> Rect {
         self.areas
-            .get(id)
+            .get(&id)
             .copied()
-            .unwrap_or_else(|| panic!("Required layout section '{}' not found", id))
+            .expect(&format!("Required layout section {:?} not found", id))
     }
 }
 
@@ -45,7 +48,7 @@ pub struct DynamicLayoutBuilder {
 }
 
 struct LayoutSection {
-    id: &'static str,
+    id: Section,
     constraint: Constraint,
     visible: bool,
 }
@@ -60,7 +63,7 @@ impl DynamicLayoutBuilder {
     }
 
     /// Add a section that is always visible
-    pub fn section(mut self, id: &'static str, constraint: Constraint) -> Self {
+    pub fn section(mut self, id: Section, constraint: Constraint) -> Self {
         self.sections.push(LayoutSection {
             id,
             constraint,
@@ -70,7 +73,7 @@ impl DynamicLayoutBuilder {
     }
 
     /// Add a section that is conditionally visible
-    pub fn section_if(mut self, visible: bool, id: &'static str, constraint: Constraint) -> Self {
+    pub fn section_if(mut self, visible: bool, id: Section, constraint: Constraint) -> Self {
         self.sections.push(LayoutSection {
             id,
             constraint,
@@ -117,41 +120,41 @@ mod tests {
     fn test_all_sections_visible() {
         let area = Rect::new(0, 0, 100, 50);
         let layout = DynamicLayout::vertical(area)
-            .section("header", Constraint::Length(2))
-            .section("content", Constraint::Min(0))
-            .section("footer", Constraint::Length(1))
+            .section(Section::Title, Constraint::Length(2))
+            .section(Section::Content, Constraint::Min(0))
+            .section(Section::Status, Constraint::Length(1))
             .build();
 
-        assert!(layout.get("header").is_some());
-        assert!(layout.get("content").is_some());
-        assert!(layout.get("footer").is_some());
+        assert!(layout.get(Section::Title).is_some());
+        assert!(layout.get(Section::Content).is_some());
+        assert!(layout.get(Section::Status).is_some());
     }
 
     #[test]
     fn test_conditional_section_hidden() {
         let area = Rect::new(0, 0, 100, 50);
         let layout = DynamicLayout::vertical(area)
-            .section("header", Constraint::Length(2))
-            .section_if(false, "search", Constraint::Length(3))
-            .section("content", Constraint::Min(0))
+            .section(Section::Title, Constraint::Length(2))
+            .section_if(false, Section::Search, Constraint::Length(3))
+            .section(Section::Content, Constraint::Min(0))
             .build();
 
-        assert!(layout.get("header").is_some());
-        assert!(layout.get("search").is_none());
-        assert!(layout.get("content").is_some());
+        assert!(layout.get(Section::Title).is_some());
+        assert!(layout.get(Section::Search).is_none());
+        assert!(layout.get(Section::Content).is_some());
     }
 
     #[test]
     fn test_conditional_section_visible() {
         let area = Rect::new(0, 0, 100, 50);
         let layout = DynamicLayout::vertical(area)
-            .section("header", Constraint::Length(2))
-            .section_if(true, "search", Constraint::Length(3))
-            .section("content", Constraint::Min(0))
+            .section(Section::Title, Constraint::Length(2))
+            .section_if(true, Section::Search, Constraint::Length(3))
+            .section(Section::Content, Constraint::Min(0))
             .build();
 
-        assert!(layout.get("header").is_some());
-        assert!(layout.get("search").is_some());
-        assert!(layout.get("content").is_some());
+        assert!(layout.get(Section::Title).is_some());
+        assert!(layout.get(Section::Search).is_some());
+        assert!(layout.get(Section::Content).is_some());
     }
 }
