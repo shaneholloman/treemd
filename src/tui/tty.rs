@@ -8,9 +8,10 @@
 //! - Validates file descriptors before use
 //! - Proper cleanup on error paths
 
-use crossterm::event::{Event, read};
+use crossterm::event::{Event, poll, read};
 use std::fs::File;
 use std::io;
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::mem::MaybeUninit;
@@ -225,4 +226,87 @@ pub fn read_event() -> io::Result<Event> {
 #[cfg(not(unix))]
 pub fn read_event() -> io::Result<Event> {
     read()
+}
+
+/// Poll for an event with timeout, handling piped stdin
+///
+/// Returns true if an event is available, false if timeout occurred.
+///
+/// # Safety
+/// Uses unsafe libc calls for file descriptor manipulation with proper cleanup.
+#[cfg(unix)]
+pub fn poll_event(timeout: Duration) -> io::Result<bool> {
+    use std::os::unix::io::{AsRawFd, IntoRawFd};
+
+    // Check if stdin is a TTY
+    let stdin_fd = io::stdin().as_raw_fd();
+
+    // SAFETY: isatty is safe to call with any fd
+    if unsafe { libc::isatty(stdin_fd) } == 1 {
+        // Stdin is a TTY, use normal polling
+        return poll(timeout);
+    }
+
+    // Stdin is piped - we need to poll /dev/tty
+    // Strategy: dup stdin, open /dev/tty, dup2 it to fd 0, poll, restore stdin
+
+    // SAFETY: These libc calls manipulate file descriptors with proper error handling
+    // and cleanup on all error paths
+    unsafe {
+        // Save current stdin
+        let saved_stdin = libc::dup(0);
+        if saved_stdin < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // Open /dev/tty
+        let tty = match File::options().read(true).write(true).open("/dev/tty") {
+            Ok(f) => f,
+            Err(e) => {
+                libc::close(saved_stdin);
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "Cannot open /dev/tty: {}. Interactive mode requires a terminal.",
+                        e
+                    ),
+                ));
+            }
+        };
+
+        let tty_fd = tty.into_raw_fd();
+
+        // Validate tty_fd
+        if tty_fd < 0 {
+            libc::close(saved_stdin);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Invalid file descriptor for /dev/tty",
+            ));
+        }
+
+        // Redirect stdin to /dev/tty
+        if libc::dup2(tty_fd, 0) < 0 {
+            let err = io::Error::last_os_error();
+            libc::close(tty_fd);
+            libc::close(saved_stdin);
+            return Err(err);
+        }
+
+        libc::close(tty_fd);
+
+        // Now poll (crossterm will use the redirected stdin)
+        let result = poll(timeout);
+
+        // Restore original stdin (always, even if poll failed)
+        libc::dup2(saved_stdin, 0);
+        libc::close(saved_stdin);
+
+        result
+    }
+}
+
+#[cfg(not(unix))]
+pub fn poll_event(timeout: Duration) -> io::Result<bool> {
+    poll(timeout)
 }
