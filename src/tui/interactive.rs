@@ -199,8 +199,10 @@ impl InteractiveState {
                     current_line += 1;
                 }
                 Block::List { items, .. } => {
-                    // Extract checkboxes
+                    // Extract checkboxes and links from list items
                     for (item_idx, item) in items.iter().enumerate() {
+                        let item_start_line = current_line;
+
                         if let Some(checked) = item.checked {
                             let id = ElementId {
                                 block_idx,
@@ -218,6 +220,45 @@ impl InteractiveState {
                                 line_range: (current_line, current_line + 1),
                             });
                         }
+
+                        // Also extract links from list items (e.g., TOC links)
+                        for (inline_idx, inline_elem) in item.inline.iter().enumerate() {
+                            if let InlineElement::Link { text, url, .. } = inline_elem {
+                                // Use a composite sub_idx to differentiate from checkboxes
+                                // Format: item_idx * 1000 + inline_idx + 100 (to avoid collision with checkbox indices)
+                                let id = ElementId {
+                                    block_idx,
+                                    sub_idx: Some(item_idx * 1000 + inline_idx + 100),
+                                };
+
+                                // Parse link target
+                                let target = if let Some(anchor) = url.strip_prefix('#') {
+                                    LinkTarget::Anchor(anchor.to_string())
+                                } else if url.starts_with("http://") || url.starts_with("https://") {
+                                    LinkTarget::External(url.clone())
+                                } else if let Some((path, anchor)) = url.split_once('#') {
+                                    LinkTarget::RelativeFile {
+                                        path: path.into(),
+                                        anchor: Some(anchor.to_string()),
+                                    }
+                                } else {
+                                    LinkTarget::RelativeFile {
+                                        path: url.into(),
+                                        anchor: None,
+                                    }
+                                };
+
+                                self.elements.push(InteractiveElement {
+                                    id,
+                                    element_type: ElementType::Link {
+                                        link: Link::new(text.clone(), target, 0),
+                                        line_idx: item_start_line,
+                                    },
+                                    line_range: (item_start_line, item_start_line + 1),
+                                });
+                            }
+                        }
+
                         current_line += 1;
                     }
                 }
@@ -294,6 +335,9 @@ impl InteractiveState {
                     current_line += count_single_block_lines(block);
                 }
             }
+
+            // Account for blank line added after each block in render_markdown_enhanced
+            current_line += 1;
         }
 
         // Reset selection if elements changed
