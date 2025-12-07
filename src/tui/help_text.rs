@@ -110,7 +110,8 @@ pub const HELP_LINES: &[HelpLine] = &[
     // General
     section("General"),
     keybinding("Tab", "Switch between Outline and Content"),
-    keybinding("/", "Search/filter headings"),
+    keybinding("/", "Search (outline=filter | content=search document)"),
+    keybinding("n/N", "Next/previous search match (in document search)"),
     keybinding("r", "Toggle raw source view"),
     keybinding("?", "Toggle this help"),
     keybinding("q/Esc", "Quit"),
@@ -119,6 +120,8 @@ pub const HELP_LINES: &[HelpLine] = &[
     section("UX Features"),
     keybinding("w", "Toggle outline visibility (full-width content)"),
     keybinding("[ ]", "Decrease/increase outline width (20%, 30%, 40%)"),
+    keybinding("S", "Save outline width to config (with confirmation)"),
+    keybinding(":", "Open command palette (fuzzy search commands)"),
     keybinding("1-9", "Jump to heading 1-9"),
     keybinding("m", "Set bookmark (shows ⚑ indicator)"),
     keybinding("'", "Jump to bookmarked position"),
