@@ -575,6 +575,15 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                             KeyCode::Char('k') | KeyCode::Up => app.previous(),
                             KeyCode::Char('d') => app.scroll_page_down(),
                             KeyCode::Char('u') => app.scroll_page_up(),
+                            // Allow entering interactive and link follow modes
+                            KeyCode::Char('i') => {
+                                app.clear_doc_search();
+                                app.enter_interactive_mode();
+                            }
+                            KeyCode::Char('f') => {
+                                app.clear_doc_search();
+                                app.enter_link_follow_mode();
+                            }
                             _ => {}
                         }
                     }
