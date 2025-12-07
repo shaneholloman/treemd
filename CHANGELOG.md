@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2025-12-07
+
+### Added
+
+- **Command palette** - Press `:` to open a fuzzy-searchable command palette ([#32](https://github.com/Epistates/treemd/issues/32))
+  - Type to filter commands with fuzzy matching
+  - Navigate with `j`/`k` or arrow keys, execute with `Enter`
+  - Commands include: Save width, Toggle outline, Toggle help, Toggle raw source, Jump to top/bottom, Quit
+  - Each command has aliases (e.g., `w`/`write`/`save` for save width)
+
+- **Save outline width with confirmation** - Press `S` to save current outline width to config with modal confirmation ([#32](https://github.com/Epistates/treemd/issues/32))
+  - Shows confirmation dialog before saving
+  - Respects power users: manual config values are session-only until explicitly saved
+  - New users with default config get auto-save behavior
+
+- **Document search with n/N navigation** - Full in-document search with match highlighting ([#30](https://github.com/Epistates/treemd/issues/30))
+  - Press `/` in content pane to search within the document
+  - Press `n` for next match, `N` for previous match
+  - Matches highlighted in content view
+  - Status bar shows match count and current position
+
+### Fixed
+
+- **Anchor links in interactive mode** - Following anchor links to headings in current file now works correctly ([#29](https://github.com/Epistates/treemd/issues/29))
+  - Changed from `select_by_text()` to `jump_to_anchor()` for proper anchor handling
+  - Anchor links like `#installation` now jump to correct heading
+
+- **Wikilinks with path separators** - Wikilinks containing `/` now work correctly ([#28](https://github.com/Epistates/treemd/issues/28))
+  - Removed overly restrictive check that blocked all paths with `/`
+  - Still blocks `..` for security (prevents directory traversal)
+  - `[[docs/guide]]` now resolves to `docs/guide.md`
+
+- **Checkbox toggle scroll jump** - Toggling checkboxes no longer causes page to jump to top ([#31](https://github.com/Epistates/treemd/issues/31))
+  - Saves and restores scroll position and element index on file reload
+  - Interactive mode state preserved after checkbox toggle
+
+- **Config value protection** - Outline width cycling no longer overwrites custom config values ([#32](https://github.com/Epistates/treemd/issues/32))
+  - Tracks whether config has custom outline width at startup
+  - Power users with custom values: cycling is session-only
+  - New users with standard values: auto-save for convenience
+
+### Technical
+
+- **Command palette system** (`src/tui/app.rs`)
+  - `CommandAction` enum for available actions
+  - `PaletteCommand` struct with fuzzy matching and scoring
+  - `PALETTE_COMMANDS` constant with all commands and aliases
+  - Filter/navigation/execution methods for palette state
+
+- **Save confirmation modal** (`src/tui/ui/popups.rs`)
+  - `render_save_width_confirm()` for confirmation dialog
+  - `render_command_palette()` for command palette UI
+
+- **Config tracking** (`src/tui/app.rs`)
+  - `config_has_custom_outline_width` flag to detect power user configs
+  - Standard widths: 20%, 30%, 40% - anything else is custom
+
 ## [0.4.7] - 2025-12-05
 
 ### Fixed
