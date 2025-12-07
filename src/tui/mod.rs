@@ -542,6 +542,11 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                         match key.code {
                             KeyCode::Esc => app.cancel_doc_search(),
                             KeyCode::Enter => app.accept_doc_search(),
+                            KeyCode::Char('u') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                // Ctrl+U: clear the search query
+                                app.doc_search_query.clear();
+                                app.update_doc_search_matches();
+                            }
                             KeyCode::Char(c) => app.doc_search_input(c),
                             KeyCode::Backspace => app.doc_search_backspace(),
                             KeyCode::Down => app.next_doc_match(),
@@ -558,6 +563,12 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                                 // Re-enter search input mode
                                 app.doc_search_active = true;
                             }
+                            KeyCode::Char('u') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                // Ctrl+U: clear the search query and highlights
+                                app.doc_search_query.clear();
+                                app.doc_search_matches.clear();
+                                app.doc_search_current_idx = None;
+                            }
                             KeyCode::Char('q') => return Ok(()),
                             // Allow navigation while in search mode
                             KeyCode::Char('j') | KeyCode::Down => app.next(),
@@ -571,10 +582,20 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                 // Handle outline search mode separately
                 else if app.show_search {
                     match key.code {
-                        KeyCode::Esc => app.toggle_search(),
+                        KeyCode::Esc => {
+                            // Esc clears the filter and closes search
+                            app.search_query.clear();
+                            app.filter_outline();
+                            app.show_search = false;
+                        }
                         KeyCode::Enter => {
-                            app.toggle_search();
-                            // Keep the filtered results
+                            // Enter keeps filter results but closes search bar
+                            app.show_search = false;
+                        }
+                        KeyCode::Char('u') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                            // Ctrl+U: clear the search query
+                            app.search_query.clear();
+                            app.filter_outline();
                         }
                         KeyCode::Char(c) => app.search_input(c),
                         KeyCode::Backspace => app.search_backspace(),
@@ -590,12 +611,12 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                         KeyCode::Char('q') | KeyCode::Esc if !app.show_help => return Ok(()),
                         KeyCode::Char('?') => app.toggle_help(),
                         KeyCode::Char('/') => {
-                            // / in outline = filter headings, / in content = search document
-                            if app.focus == app::Focus::Content {
-                                app.enter_doc_search();
-                            } else {
-                                app.toggle_search();
-                            }
+                            // / always enters document search (vim-like behavior)
+                            app.enter_doc_search();
+                        }
+                        KeyCode::Char('s') => {
+                            // s opens outline filter
+                            app.toggle_search();
                         }
                         // n/N for document search navigation from normal mode
                         KeyCode::Char('n') if !app.doc_search_matches.is_empty() => {
