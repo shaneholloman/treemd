@@ -1834,17 +1834,35 @@ impl App {
         }
     }
 
-    /// Jump to a heading by anchor name
+    /// Jump to a heading by anchor name or heading text
+    ///
+    /// Supports two matching strategies:
+    /// 1. Normalized anchor match - for markdown links like `#mixed-links-test`
+    /// 2. Heading text match - for wikilinks like `[[#Mixed Links Test]]`
     fn jump_to_anchor(&mut self, anchor: &str) -> Result<(), String> {
-        // Find heading that matches the anchor
+        let anchor_lower = anchor.to_lowercase();
+
+        // Strategy 1: Try normalized anchor match (case-insensitive)
+        // Handles: [text](#features), [text](#mixed-links-test), [[#Features]]
         for (idx, item) in self.outline_items.iter().enumerate() {
             let item_anchor = Self::heading_to_anchor(&item.text);
-            if item_anchor == anchor {
+            if item_anchor == anchor_lower {
                 self.outline_state.select(Some(idx));
                 self.outline_scroll_state = self.outline_scroll_state.position(idx);
                 return Ok(());
             }
         }
+
+        // Strategy 2: Try heading text match (case-insensitive)
+        // Handles: [[#Mixed Links Test]] where spaces aren't converted to dashes
+        for (idx, item) in self.outline_items.iter().enumerate() {
+            if item.text.to_lowercase() == anchor_lower {
+                self.outline_state.select(Some(idx));
+                self.outline_scroll_state = self.outline_scroll_state.position(idx);
+                return Ok(());
+            }
+        }
+
         Err(format!("Heading '{}' not found", anchor))
     }
 
