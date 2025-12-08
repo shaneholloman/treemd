@@ -981,7 +981,8 @@ fn render_markdown_enhanced(
     Text::from(lines)
 }
 
-/// Apply search highlighting to rendered text by searching each line for the query
+/// Apply search highlighting to rendered text while preserving original span styles.
+/// This function overlays search highlight styles on top of existing styling (links, bold, etc.)
 fn apply_search_highlighting(
     text: Text<'static>,
     query: &str,
@@ -994,18 +995,27 @@ fn apply_search_highlighting(
     }
 
     let query_lower = query.to_lowercase();
-    let query_len = query.len();
     let mut new_lines = Vec::new();
     let mut match_counter = 0usize;
 
     for line in text.lines.into_iter() {
-        // Join all spans to get the full line text
+        // Build span index: (byte_start, byte_end, span_index)
+        let mut span_ranges: Vec<(usize, usize, usize)> = Vec::new();
+        let mut byte_pos = 0;
+        for (idx, span) in line.spans.iter().enumerate() {
+            let span_len = span.content.len();
+            span_ranges.push((byte_pos, byte_pos + span_len, idx));
+            byte_pos += span_len;
+        }
+
+        // Join all spans to get the full line text for searching
         let full_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         let full_text_lower = full_text.to_lowercase();
 
         // Find all occurrences of the query in this line (non-overlapping)
         let mut matches_in_line: Vec<(usize, usize)> = Vec::new();
         let mut search_start = 0;
+        let query_len = query.len();
 
         while let Some(rel_pos) = full_text_lower[search_start..].find(&query_lower) {
             let byte_start = search_start + rel_pos;
@@ -1016,7 +1026,7 @@ fn apply_search_highlighting(
                 matches_in_line.push((byte_start, byte_end));
             }
 
-            search_start = byte_end; // Move past this match
+            search_start = byte_end;
             if search_start >= full_text_lower.len() {
                 break;
             }
@@ -1026,33 +1036,73 @@ fn apply_search_highlighting(
             // No matches in this line - keep original
             new_lines.push(line);
         } else {
-            // Rebuild line with highlighted matches
+            // Rebuild line with highlighted matches while preserving original styles
             let mut new_spans: Vec<Span<'static>> = Vec::new();
-            let mut pos = 0;
 
-            for (start, end) in matches_in_line {
-                let is_current = total_matches > 0 && current_match_idx == Some(match_counter);
+            // Process each original span and split it at match boundaries
+            for (span_start, span_end, span_idx) in &span_ranges {
+                let original_span = &line.spans[*span_idx];
+                let original_style = original_span.style;
+                let span_text = original_span.content.as_ref();
 
-                // Add text before highlight
-                if pos < start {
-                    new_spans.push(Span::raw(full_text[pos..start].to_string()));
+                // Find which matches overlap with this span
+                let mut current_pos = 0; // position within the span
+
+                for (match_start, match_end) in &matches_in_line {
+                    // Skip matches that are entirely before this span
+                    if *match_end <= *span_start {
+                        continue;
+                    }
+                    // Stop if match is entirely after this span
+                    if *match_start >= *span_end {
+                        break;
+                    }
+
+                    let is_current = total_matches > 0 && current_match_idx == Some(match_counter);
+
+                    // Calculate positions relative to span
+                    let rel_match_start = match_start.saturating_sub(*span_start);
+                    let rel_match_end = (*match_end).min(*span_end) - *span_start;
+
+                    // Add text before the match (with original style)
+                    if current_pos < rel_match_start {
+                        if let Some(before_text) = safe_slice(span_text, current_pos, rel_match_start) {
+                            if !before_text.is_empty() {
+                                new_spans.push(Span::styled(before_text.to_string(), original_style));
+                            }
+                        }
+                    }
+
+                    // Add the matched portion (with search highlight style)
+                    let highlight_style = if is_current {
+                        theme.search_current_style()
+                    } else {
+                        theme.search_match_style()
+                    };
+
+                    let actual_start = rel_match_start.max(current_pos);
+                    if let Some(match_text) = safe_slice(span_text, actual_start, rel_match_end) {
+                        if !match_text.is_empty() {
+                            new_spans.push(Span::styled(match_text.to_string(), highlight_style));
+                        }
+                    }
+
+                    current_pos = rel_match_end;
+
+                    // Only increment counter when we finish the match (match_end <= span_end)
+                    if *match_end <= *span_end {
+                        match_counter += 1;
+                    }
                 }
 
-                // Add highlighted text - use theme colors
-                let highlight_style = if is_current {
-                    theme.search_current_style()
-                } else {
-                    theme.search_match_style()
-                };
-                new_spans.push(Span::styled(full_text[start..end].to_string(), highlight_style));
-
-                pos = end;
-                match_counter += 1;
-            }
-
-            // Add remaining text after last match
-            if pos < full_text.len() {
-                new_spans.push(Span::raw(full_text[pos..].to_string()));
+                // Add remaining text after all matches in this span (with original style)
+                if current_pos < span_text.len() {
+                    if let Some(after_text) = safe_slice(span_text, current_pos, span_text.len()) {
+                        if !after_text.is_empty() {
+                            new_spans.push(Span::styled(after_text.to_string(), original_style));
+                        }
+                    }
+                }
             }
 
             new_lines.push(Line::from(new_spans));
@@ -1060,6 +1110,17 @@ fn apply_search_highlighting(
     }
 
     Text::from(new_lines)
+}
+
+/// Safely slice a string at byte boundaries, returning None if boundaries are invalid
+fn safe_slice(s: &str, start: usize, end: usize) -> Option<&str> {
+    if start > end || end > s.len() {
+        return None;
+    }
+    if !s.is_char_boundary(start) || !s.is_char_boundary(end) {
+        return None;
+    }
+    Some(&s[start..end])
 }
 
 fn render_block_to_lines(
