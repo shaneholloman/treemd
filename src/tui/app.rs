@@ -529,8 +529,20 @@ impl App {
             Previous => self.previous(),
             First => self.first(),
             Last => self.last(),
-            PageDown => self.scroll_page_down(),
-            PageUp => self.scroll_page_up(),
+            PageDown => {
+                if self.show_help {
+                    self.scroll_help_page_down();
+                } else {
+                    self.scroll_page_down();
+                }
+            }
+            PageUp => {
+                if self.show_help {
+                    self.scroll_help_page_up();
+                } else {
+                    self.scroll_page_up();
+                }
+            }
             JumpToParent => self.jump_to_parent(),
 
             // === Outline ===
@@ -1030,22 +1042,21 @@ impl App {
     }
 
     pub fn jump_to_parent(&mut self) {
-        if self.focus == Focus::Outline {
-            if let Some(current_idx) = self.outline_state.selected() {
-                if current_idx < self.outline_items.len() {
-                    let current_level = self.outline_items[current_idx].level;
+        // Works in both Outline and Content focus
+        if let Some(current_idx) = self.outline_state.selected() {
+            if current_idx < self.outline_items.len() {
+                let current_level = self.outline_items[current_idx].level;
 
-                    // Search backwards for a heading with lower level (parent)
-                    for i in (0..current_idx).rev() {
-                        if self.outline_items[i].level < current_level {
-                            self.select_outline_index(i);
-                            return;
-                        }
+                // Search backwards for a heading with lower level (parent)
+                for i in (0..current_idx).rev() {
+                    if self.outline_items[i].level < current_level {
+                        self.select_outline_index(i);
+                        return;
                     }
-
-                    // If no parent found, stay at current position
-                    // (we're already at a top-level heading or first item)
                 }
+
+                // If no parent found, stay at current position
+                // (we're already at a top-level heading or first item)
             }
         }
     }
@@ -1067,6 +1078,22 @@ impl App {
 
     pub fn scroll_help_up(&mut self) {
         self.help_scroll = self.help_scroll.saturating_sub(1);
+    }
+
+    /// Scroll help popup down by half a page
+    pub fn scroll_help_page_down(&mut self) {
+        let page_size = 10u16;
+        let new_scroll = self.help_scroll.saturating_add(page_size);
+        let max_scroll = help_text::HELP_LINES.len() as u16;
+        if new_scroll < max_scroll {
+            self.help_scroll = new_scroll;
+        }
+    }
+
+    /// Scroll help popup up by half a page
+    pub fn scroll_help_page_up(&mut self) {
+        let page_size = 10u16;
+        self.help_scroll = self.help_scroll.saturating_sub(page_size);
     }
 
     pub fn toggle_search(&mut self) {
