@@ -1,3 +1,4 @@
+use crate::keybindings::{KeybindingsConfig, Keybindings};
 use crate::tui::theme::ThemeName;
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,9 @@ pub struct Config {
 
     #[serde(default)]
     pub theme: CustomThemeConfig,
+
+    #[serde(default)]
+    pub keybindings: KeybindingsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,5 +255,10 @@ impl Config {
     pub fn set_warned_terminal_app(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.terminal.warned_terminal_app = true;
         self.save()
+    }
+
+    /// Get keybindings with user customizations applied
+    pub fn keybindings(&self) -> Keybindings {
+        self.keybindings.to_keybindings()
     }
 }
