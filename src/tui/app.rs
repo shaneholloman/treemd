@@ -1178,7 +1178,8 @@ impl App {
         }
     }
 
-    /// Toggle between outline search and document search, preserving the query
+    /// Toggle between outline search and document search, preserving the query.
+    /// After search is accepted (Enter pressed), Tab cycles through matches instead.
     pub fn toggle_search_mode(&mut self) {
         if self.show_search {
             // Currently in outline search -> switch to doc search
@@ -1197,20 +1198,24 @@ impl App {
             self.doc_search_current_idx = None;
             self.update_doc_search_matches();
         } else if self.mode == AppMode::DocSearch {
-            // Currently in doc search -> switch to outline search
-            let query = self.doc_search_query.clone();
-            let was_active = self.doc_search_active;
-            self.mode = AppMode::Normal;
-            self.doc_search_active = false;
-            self.doc_search_query.clear();
-            self.doc_search_matches.clear();
-            self.doc_search_current_idx = None;
+            if self.doc_search_active {
+                // Still typing -> switch to outline search
+                let query = self.doc_search_query.clone();
+                self.mode = AppMode::Normal;
+                self.doc_search_active = false;
+                self.doc_search_query.clear();
+                self.doc_search_matches.clear();
+                self.doc_search_current_idx = None;
 
-            // Enter outline search with the same query
-            self.show_search = true;
-            self.outline_search_active = was_active; // Preserve active state
-            self.search_query = query;
-            self.filter_outline();
+                // Enter outline search with the same query
+                self.show_search = true;
+                self.outline_search_active = true; // Keep input active
+                self.search_query = query;
+                self.filter_outline();
+            } else {
+                // Search accepted (after Enter) -> cycle through matches
+                self.next_doc_match();
+            }
         }
     }
 
@@ -1352,10 +1357,13 @@ impl App {
             self.document.content.clone()
         };
 
+        // Convert to plain text using parser (strips links, formatting, etc.)
+        // This ensures search matches what's visible when rendered
+        let plain_content = turbovault_parser::to_plain_text(&content);
         let query = self.doc_search_query.to_lowercase();
 
         // Find all exact substring matches (case-insensitive)
-        for (line_num, line) in content.lines().enumerate() {
+        for (line_num, line) in plain_content.lines().enumerate() {
             let line_lower = line.to_lowercase();
 
             let mut search_start = 0;

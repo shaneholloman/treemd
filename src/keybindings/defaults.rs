@@ -336,12 +336,14 @@ fn add_doc_search_mode(kb: &mut Keybindings) {
     // Delete character
     bind(kb, DocSearch, "Backspace", SearchBackspace);
 
-    // Navigate matches (while typing and after accepting)
+    // Navigate matches (after accepting with Enter)
     bind(kb, DocSearch, "n", NextMatch);
     bind(kb, DocSearch, "N", PrevMatch);
     bind(kb, DocSearch, "Down", NextMatch);
     bind(kb, DocSearch, "Up", PrevMatch);
-    bind(kb, DocSearch, "Tab", NextMatch);
+
+    // Toggle to outline search (while typing), or cycle matches (after Enter)
+    bind(kb, DocSearch, "Tab", ToggleSearchMode);
     bind(kb, DocSearch, "Shift+Tab", PrevMatch);
 
     // Re-enter search input with /
