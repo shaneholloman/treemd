@@ -128,9 +128,12 @@ fn render_title_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
-    // Check if we're in document search mode
-    if app.mode == AppMode::DocSearch {
-        let match_info = if !app.doc_search_matches.is_empty() {
+    // Unified search bar rendering for both outline and document search
+    let is_doc_search = app.mode == AppMode::DocSearch;
+
+    // Get the current query and display state
+    let (query, is_active, match_info) = if is_doc_search {
+        let info = if !app.doc_search_matches.is_empty() {
             let current = app.doc_search_current_idx.unwrap_or(0) + 1;
             let total = app.doc_search_matches.len();
             format!(" [{}/{}]", current, total)
@@ -139,78 +142,69 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             String::new()
         };
-
-        // Build search bar with query and hints
-        let mut line_spans = vec![
-            Span::raw("Find: "),
-            Span::styled(
-                if app.doc_search_active {
-                    format!("{}_", app.doc_search_query)
-                } else {
-                    app.doc_search_query.clone()
-                },
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(match_info),
-        ];
-
-        // Add hint text on the right side
-        let hint = if app.doc_search_active {
-            "  (Esc: exit, Ctrl+U: clear, n/N: next/prev)"
-        } else {
-            "  (Esc: exit, /: edit, Ctrl+U: clear, n/N: nav)"
-        };
-        line_spans.push(Span::styled(
-            hint.to_string(),
-            Style::default().fg(Color::DarkGray),
-        ));
-
-        let paragraph = Paragraph::new(Line::from(line_spans))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan))
-                    .title(" Document Search ")
-                    .style(Style::default().bg(Color::Rgb(30, 30, 50))),
-            )
-            .style(Style::default().fg(Color::White));
-
-        frame.render_widget(paragraph, area);
+        (&app.doc_search_query, app.doc_search_active, info)
     } else {
-        // Outline/heading search
-        let mut line_spans = vec![
-            Span::raw("Search: "),
-            Span::styled(
-                format!("{}_", app.search_query),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
-        ];
+        // Outline search
+        (&app.search_query, app.outline_search_active, String::new())
+    };
 
-        // Add hint text on the right side
-        let hint = "  (Esc: exit, Ctrl+U: clear)";
-        line_spans.push(Span::styled(
-            hint.to_string(),
-            Style::default().fg(Color::DarkGray),
-        ));
+    // Styling based on search type
+    let (label, title, accent_color) = if is_doc_search {
+        ("Find", " Content Search (Tab: switch to Outline) ", Color::Cyan)
+    } else {
+        ("Filter", " Outline Search (Tab: switch to Content) ", Color::Yellow)
+    };
 
-        let paragraph = Paragraph::new(Line::from(line_spans))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow))
-                    .title(" Filter Headings ")
-                    .style(Style::default().bg(Color::Rgb(30, 30, 50))),
-            )
-            .style(Style::default().fg(Color::White));
+    // Build search bar with query
+    let query_display = if is_active {
+        format!("{}_", query)
+    } else {
+        query.clone()
+    };
 
-        frame.render_widget(paragraph, area);
-    }
+    let mut line_spans = vec![
+        Span::raw(format!("{}: ", label)),
+        Span::styled(
+            query_display,
+            Style::default().fg(accent_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(match_info),
+    ];
+
+    // Add hint text - consistent for both modes
+    let hint = if is_active {
+        "  (Esc, Ctrl+U)"
+    } else {
+        "  (Esc, Tab, /: edit)"
+    };
+    line_spans.push(Span::styled(
+        hint.to_string(),
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let paragraph = Paragraph::new(Line::from(line_spans))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(accent_color))
+                .title(title)
+                .style(Style::default().bg(Color::Rgb(30, 30, 50))),
+        )
+        .style(Style::default().fg(Color::White));
+
+    frame.render_widget(paragraph, area);
 }
 
 fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
     use crate::tui::app::DOCUMENT_OVERVIEW;
+    use util::build_highlighted_line;
 
     let theme = &app.theme;
+    let search_query = if app.show_search && !app.search_query.is_empty() {
+        Some(app.search_query.as_str())
+    } else {
+        None
+    };
 
     let items: Vec<ListItem> = app
         .outline_items
@@ -234,23 +228,24 @@ fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
 
             // Color headings by level using theme
             let color = theme.heading_color(item.level);
+            let base_style = Style::default().fg(color);
 
-            // Special formatting for document overview (level 0) vs normal headings
-            let text = if item.text == DOCUMENT_OVERVIEW {
-                // Document overview: use 📄 icon instead of # prefix
-                format!(
-                    "{}{}{}📄 {}",
-                    indent, expand_indicator, bookmark_indicator, item.text
-                )
+            // Build prefix (indent + indicators + #'s)
+            let prefix_text = if item.text == DOCUMENT_OVERVIEW {
+                format!("{}{}{}📄 ", indent, expand_indicator, bookmark_indicator)
             } else {
-                // Normal headings: use # prefix
-                let prefix = "#".repeat(item.level);
-                format!(
-                    "{}{}{}{} {}",
-                    indent, expand_indicator, bookmark_indicator, prefix, item.text
-                )
+                let hashes = "#".repeat(item.level);
+                format!("{}{}{}{} ", indent, expand_indicator, bookmark_indicator, hashes)
             };
-            let line = Line::from(Span::styled(text, Style::default().fg(color)));
+
+            // Build line with search highlighting using shared utility
+            let line = build_highlighted_line(
+                vec![Span::styled(prefix_text, base_style)],
+                &item.text,
+                search_query,
+                base_style,
+                theme.search_match_style(),
+            );
 
             ListItem::new(line)
         })
@@ -353,7 +348,8 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
         )
     };
 
-    // Apply search highlighting if document search is active and we have a query
+    // Apply search highlighting only for document/content search mode
+    // Outline search (s) only filters headings, it doesn't highlight content
     if app.mode == AppMode::DocSearch && !app.doc_search_query.is_empty() {
         rendered_text = apply_search_highlighting(
             rendered_text,
@@ -574,6 +570,7 @@ fn render_markdown_enhanced(
                 level,
                 content,
                 inline,
+                ..
             } => {
                 // Render sub-heading with appropriate styling
                 let mut formatted = if !inline.is_empty() {
@@ -671,16 +668,19 @@ fn render_markdown_enhanced(
                         .unwrap_or(false);
 
                     // Check if a link within this list item is selected
-                    // Link sub_idx format: item_idx * 1000 + inline_idx + 100
+                    use crate::tui::interactive::{LINK_ITEM_MULTIPLIER, LINK_OFFSET};
                     let selected_link_inline_idx = selected_element_id.and_then(|id| {
                         if id.block_idx == block_idx {
                             id.sub_idx.and_then(|sub| {
                                 // Decode: check if this is a link sub_idx for this item
-                                if sub >= 100
-                                    && sub >= idx * 1000 + 100
-                                    && sub < (idx + 1) * 1000 + 100
+                                let item_link_base = idx * LINK_ITEM_MULTIPLIER + LINK_OFFSET;
+                                let next_item_link_base =
+                                    (idx + 1) * LINK_ITEM_MULTIPLIER + LINK_OFFSET;
+                                if sub >= LINK_OFFSET
+                                    && sub >= item_link_base
+                                    && sub < next_item_link_base
                                 {
-                                    Some(sub - idx * 1000 - 100)
+                                    Some(sub - item_link_base)
                                 } else {
                                     None
                                 }
@@ -801,11 +801,47 @@ fn render_markdown_enhanced(
                     }
 
                     // Render nested blocks within this list item (e.g., code blocks)
-                    for nested_block in &item.blocks {
+                    use crate::tui::interactive::{
+                        CODE_BLOCK_OFFSET, IMAGE_OFFSET, ITEM_MULTIPLIER, NESTED_MULTIPLIER,
+                        TABLE_OFFSET,
+                    };
+                    for (nested_idx, nested_block) in item.blocks.iter().enumerate() {
+                        // Check if this nested block is selected
+                        let is_nested_selected = selected_element_id
+                            .map(|id| {
+                                if id.block_idx != block_idx {
+                                    return false;
+                                }
+                                if let Some(sub) = id.sub_idx {
+                                    // Decode the sub_idx to check if it matches this nested block
+                                    let base = idx * ITEM_MULTIPLIER + nested_idx * NESTED_MULTIPLIER;
+                                    sub == base + CODE_BLOCK_OFFSET
+                                        || sub == base + TABLE_OFFSET
+                                        || sub == base + IMAGE_OFFSET
+                                } else {
+                                    false
+                                }
+                            })
+                            .unwrap_or(false);
+
                         let nested_lines = render_block_to_lines(nested_block, highlighter, theme);
-                        for nested_line in nested_lines {
-                            // Add indentation for nested content (align with list item text)
-                            let mut indented_spans = vec![Span::raw("     ")]; // 5 spaces indent
+                        for (line_idx, nested_line) in nested_lines.into_iter().enumerate() {
+                            let mut indented_spans = vec![];
+
+                            // Add selection indicator on first line of nested block
+                            if is_nested_selected && line_idx == 0 {
+                                indented_spans.push(Span::styled(
+                                    "→ ",
+                                    Style::default()
+                                        .fg(theme.selection_indicator_fg)
+                                        .bg(theme.selection_indicator_bg)
+                                        .add_modifier(Modifier::BOLD),
+                                ));
+                                indented_spans.push(Span::raw("   ")); // 3 spaces (5 - 2 for arrow)
+                            } else {
+                                indented_spans.push(Span::raw("     ")); // 5 spaces indent
+                            }
+
                             indented_spans.extend(nested_line.spans);
                             lines.push(Line::from(indented_spans));
                         }
@@ -1135,6 +1171,7 @@ fn render_block_to_lines(
             level,
             content,
             inline,
+            ..
         } => {
             // Render heading with appropriate styling
             let mut formatted = if !inline.is_empty() {

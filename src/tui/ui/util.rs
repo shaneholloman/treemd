@@ -4,6 +4,8 @@
 
 use crate::parser::output::Alignment;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 /// Calculate a centered rectangular area within a parent area.
@@ -105,6 +107,104 @@ pub fn align_text(text: &str, width: usize, alignment: &Alignment) -> String {
             format!("{}{} ", " ".repeat(left_padding), text)
         }
     }
+}
+
+/// Highlight search matches within text, returning a Line with styled spans.
+///
+/// Performs case-insensitive matching and splits the text into segments,
+/// applying the highlight style to matched portions.
+///
+/// # Arguments
+/// * `text` - The text to search within
+/// * `query` - The search query (case-insensitive)
+/// * `base_style` - Style for non-matched text
+/// * `highlight_style` - Style for matched text
+///
+/// # Returns
+/// A vector of Spans with appropriate styling applied
+pub fn highlight_search_matches(
+    text: &str,
+    query: &str,
+    base_style: Style,
+    highlight_style: Style,
+) -> Vec<Span<'static>> {
+    if query.is_empty() {
+        return vec![Span::styled(text.to_string(), base_style)];
+    }
+
+    let text_lower = text.to_lowercase();
+    let query_lower = query.to_lowercase();
+
+    let mut spans = Vec::new();
+    let mut last_end = 0;
+
+    // Find all matches
+    let mut search_start = 0;
+    while let Some(rel_pos) = text_lower[search_start..].find(&query_lower) {
+        let match_start = search_start + rel_pos;
+        let match_end = match_start + query.len();
+
+        // Verify char boundaries
+        if !text.is_char_boundary(match_start) || !text.is_char_boundary(match_end) {
+            search_start = match_start + 1;
+            continue;
+        }
+
+        // Add text before match
+        if match_start > last_end {
+            spans.push(Span::styled(text[last_end..match_start].to_string(), base_style));
+        }
+
+        // Add highlighted match
+        spans.push(Span::styled(text[match_start..match_end].to_string(), highlight_style));
+
+        last_end = match_end;
+        search_start = match_end;
+
+        if search_start >= text.len() {
+            break;
+        }
+    }
+
+    // Add remaining text after last match
+    if last_end < text.len() {
+        spans.push(Span::styled(text[last_end..].to_string(), base_style));
+    }
+
+    // If no matches found, return original text with base style
+    if spans.is_empty() {
+        spans.push(Span::styled(text.to_string(), base_style));
+    }
+
+    spans
+}
+
+/// Build a Line with optional search highlighting.
+///
+/// Convenience wrapper that builds a complete Line, optionally with a prefix.
+///
+/// # Arguments
+/// * `prefix` - Optional prefix spans to prepend
+/// * `text` - The main text content
+/// * `query` - Optional search query for highlighting
+/// * `base_style` - Style for non-matched text
+/// * `highlight_style` - Style for matched text
+pub fn build_highlighted_line(
+    prefix: Vec<Span<'static>>,
+    text: &str,
+    query: Option<&str>,
+    base_style: Style,
+    highlight_style: Style,
+) -> Line<'static> {
+    let mut spans = prefix;
+
+    if let Some(q) = query {
+        spans.extend(highlight_search_matches(text, q, base_style, highlight_style));
+    } else {
+        spans.push(Span::styled(text.to_string(), base_style));
+    }
+
+    Line::from(spans)
 }
 
 #[cfg(test)]
@@ -260,6 +360,71 @@ mod tests {
             let result = align_text("A", 10, &Alignment::Center);
             // "A" is 1 wide, 9 spaces to distribute: 4 left, 5 right
             assert_eq!(result, "    A     ");
+        }
+    }
+
+    mod highlight_search_tests {
+        use super::*;
+        use ratatui::style::Color;
+
+        #[test]
+        fn test_no_match() {
+            let base = Style::default().fg(Color::White);
+            let highlight = Style::default().fg(Color::Yellow);
+            let spans = highlight_search_matches("Hello World", "xyz", base, highlight);
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].content.as_ref(), "Hello World");
+        }
+
+        #[test]
+        fn test_single_match() {
+            let base = Style::default().fg(Color::White);
+            let highlight = Style::default().fg(Color::Yellow);
+            let spans = highlight_search_matches("Hello World", "World", base, highlight);
+            assert_eq!(spans.len(), 2);
+            assert_eq!(spans[0].content.as_ref(), "Hello ");
+            assert_eq!(spans[1].content.as_ref(), "World");
+            assert_eq!(spans[1].style, highlight);
+        }
+
+        #[test]
+        fn test_case_insensitive() {
+            let base = Style::default().fg(Color::White);
+            let highlight = Style::default().fg(Color::Yellow);
+            let spans = highlight_search_matches("Hello World", "world", base, highlight);
+            assert_eq!(spans.len(), 2);
+            assert_eq!(spans[1].content.as_ref(), "World"); // Preserves original case
+        }
+
+        #[test]
+        fn test_multiple_matches() {
+            let base = Style::default().fg(Color::White);
+            let highlight = Style::default().fg(Color::Yellow);
+            let spans = highlight_search_matches("foo bar foo", "foo", base, highlight);
+            assert_eq!(spans.len(), 3);
+            assert_eq!(spans[0].content.as_ref(), "foo");
+            assert_eq!(spans[1].content.as_ref(), " bar ");
+            assert_eq!(spans[2].content.as_ref(), "foo");
+        }
+
+        #[test]
+        fn test_empty_query() {
+            let base = Style::default().fg(Color::White);
+            let highlight = Style::default().fg(Color::Yellow);
+            let spans = highlight_search_matches("Hello", "", base, highlight);
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].content.as_ref(), "Hello");
+        }
+
+        #[test]
+        fn test_match_at_start() {
+            let base = Style::default().fg(Color::White);
+            let highlight = Style::default().fg(Color::Yellow);
+            let spans = highlight_search_matches("Hello World", "Hello", base, highlight);
+            assert_eq!(spans.len(), 2);
+            assert_eq!(spans[0].content.as_ref(), "Hello");
+            assert_eq!(spans[0].style, highlight);
+            assert_eq!(spans[1].content.as_ref(), " World");
         }
     }
 }
