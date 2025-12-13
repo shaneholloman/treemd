@@ -537,6 +537,60 @@ pub fn render_save_width_confirm(frame: &mut Frame, width: u16, theme: &Theme) {
     frame.render_widget(paragraph, area);
 }
 
+/// Render the save before quit confirmation modal
+pub fn render_save_before_quit_confirm(frame: &mut Frame, edit_count: usize, theme: &Theme) {
+    use crate::tui::ui::util::centered_area;
+
+    // Create a centered dialog area
+    let area = centered_area(frame.area(), 50, 22);
+
+    // Clear the area
+    frame.render_widget(Clear, area);
+
+    // Create the dialog content
+    let text = vec![
+        Line::from(vec![Span::styled(
+            "Unsaved Changes",
+            Style::default()
+                .fg(theme.modal_title())
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            format!(
+                "You have {} unsaved change{}.",
+                edit_count,
+                if edit_count == 1 { "" } else { "s" }
+            ),
+            Style::default().fg(theme.modal_text()),
+        )]),
+        Line::from(vec![Span::styled(
+            "Save before quitting?",
+            Style::default().fg(theme.modal_text()),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("[y/Enter]", Style::default().fg(theme.modal_key_fg())),
+            Span::styled(" Save & Quit  ", Style::default().fg(theme.modal_description())),
+            Span::styled("[Esc]", Style::default().fg(theme.modal_key_fg())),
+            Span::styled(" Cancel", Style::default().fg(theme.modal_description())),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(text)
+        .alignment(ratatui::layout::Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Confirm Quit ")
+                .title_style(Style::default().fg(theme.modal_title()))
+                .border_style(Style::default().fg(theme.modal_border()))
+                .style(Style::default().bg(theme.modal_bg())),
+        );
+
+    frame.render_widget(paragraph, area);
+}
+
 /// Render the command palette with fuzzy search
 pub fn render_command_palette(frame: &mut Frame, app: &App, theme: &Theme) {
     use crate::tui::app::PALETTE_COMMANDS;

@@ -42,15 +42,18 @@ pub enum AppMode {
     Help,
     CellEdit,
     ConfirmFileCreate,
-    DocSearch,        // In-document search mode (n/N navigation)
-    CommandPalette,   // Fuzzy-searchable command palette
-    ConfirmSaveWidth, // Modal confirmation for saving outline width
+    DocSearch,           // In-document search mode (n/N navigation)
+    CommandPalette,      // Fuzzy-searchable command palette
+    ConfirmSaveWidth,    // Modal confirmation for saving outline width
+    ConfirmSaveBeforeQuit, // Prompt to save unsaved changes before quitting
 }
 
 /// Available commands in the command palette
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CommandAction {
     SaveWidth,
+    SaveFile,  // Save pending edits to file (:w)
+    Undo,      // Undo last pending edit
     ToggleOutline,
     ToggleHelp,
     ToggleRawSource,
@@ -162,8 +165,20 @@ impl PaletteCommand {
 /// All available commands
 pub const PALETTE_COMMANDS: &[PaletteCommand] = &[
     PaletteCommand::new(
-        "Save width to config",
+        "Save changes",
         &["w", "write", "save"],
+        "Save pending edits to file",
+        CommandAction::SaveFile,
+    ),
+    PaletteCommand::new(
+        "Undo edit",
+        &["u", "undo"],
+        "Undo last table cell edit",
+        CommandAction::Undo,
+    ),
+    PaletteCommand::new(
+        "Save width to config",
+        &["sw", "savewidth"],
         "Save current outline width to config file",
         CommandAction::SaveWidth,
     ),
@@ -240,6 +255,21 @@ pub struct SearchMatch {
     pub len: usize,
 }
 
+/// A pending table cell edit that hasn't been saved to file yet
+#[derive(Debug, Clone)]
+pub struct PendingEdit {
+    /// Which table in the file (0-indexed)
+    pub table_index: usize,
+    /// Row within the table (0 = header, 1+ = data rows, excludes separator)
+    pub row: usize,
+    /// Column within the table (0-indexed)
+    pub col: usize,
+    /// The original value before editing (for undo)
+    pub original_value: String,
+    /// The new value after editing
+    pub new_value: String,
+}
+
 pub struct App {
     pub document: Document,
     pub filename: String,
@@ -293,9 +323,14 @@ pub struct App {
     pub interactive_state: InteractiveState,
 
     // Cell editing state
-    pub cell_edit_value: String, // Current value being edited
-    pub cell_edit_row: usize,    // Row being edited
-    pub cell_edit_col: usize,    // Column being edited
+    pub cell_edit_value: String,          // Current value being edited
+    pub cell_edit_original_value: String, // Original value before editing (for undo)
+    pub cell_edit_row: usize,             // Row being edited
+    pub cell_edit_col: usize,             // Column being edited
+
+    // Pending edits buffer (for safe editing with explicit save)
+    pub pending_edits: Vec<PendingEdit>, // Stack of uncommitted edits
+    pub has_unsaved_changes: bool,       // True if pending_edits is non-empty
 
     // Persistent clipboard for Linux X11 compatibility
     // On Linux, the clipboard instance must stay alive to serve paste requests
@@ -451,8 +486,13 @@ impl App {
 
             // Cell editing state
             cell_edit_value: String::new(),
+            cell_edit_original_value: String::new(),
             cell_edit_row: 0,
             cell_edit_col: 0,
+
+            // Pending edits buffer
+            pending_edits: Vec::new(),
+            has_unsaved_changes: false,
 
             // Initialize persistent clipboard (None if unavailable)
             clipboard: arboard::Clipboard::new().ok(),
@@ -532,7 +572,9 @@ impl App {
             AppMode::ThemePicker => KeybindingMode::ThemePicker,
             AppMode::Help => KeybindingMode::Help,
             AppMode::CellEdit => KeybindingMode::CellEdit,
-            AppMode::ConfirmFileCreate | AppMode::ConfirmSaveWidth => KeybindingMode::ConfirmDialog,
+            AppMode::ConfirmFileCreate
+            | AppMode::ConfirmSaveWidth
+            | AppMode::ConfirmSaveBeforeQuit => KeybindingMode::ConfirmDialog,
             AppMode::DocSearch => KeybindingMode::DocSearch,
             AppMode::CommandPalette => KeybindingMode::CommandPalette,
         }
@@ -571,6 +613,9 @@ impl App {
                     self.filter_outline();
                     self.show_search = false;
                     self.outline_search_active = false;
+                } else if self.has_unsaved_changes {
+                    // Prompt to save before quitting
+                    self.mode = AppMode::ConfirmSaveBeforeQuit;
                 } else {
                     return ActionResult::Quit;
                 }
@@ -694,7 +739,12 @@ impl App {
             }
             InteractiveActivate => {
                 self.clear_count();
-                if let Err(e) = self.activate_interactive_element() {
+                // In table mode, Enter edits the cell; otherwise activate the element
+                if self.interactive_state.is_in_table_mode() {
+                    if let Err(e) = self.enter_cell_edit_mode() {
+                        self.status_message = Some(format!("✗ Error: {}", e));
+                    }
+                } else if let Err(e) = self.activate_interactive_element() {
                     self.status_message = Some(format!("✗ Error: {}", e));
                 }
                 self.update_content_metrics();
@@ -753,9 +803,19 @@ impl App {
                 let line = self.selected_heading_source_line();
                 return ActionResult::RunEditor(self.current_file_path.clone(), line);
             }
+            UndoEdit => {
+                self.clear_count();
+                if let Err(e) = self.undo_last_edit() {
+                    self.status_message = Some(format!("✗ Undo failed: {}", e));
+                }
+            }
 
             // === Dialog Actions ===
-            ConfirmAction => self.handle_confirm_action(),
+            ConfirmAction => {
+                if let Some(result) = self.handle_confirm_action() {
+                    return result;
+                }
+            }
             CancelAction => self.handle_cancel_action(),
 
             // === Jump to Heading by Number ===
@@ -878,7 +938,10 @@ impl App {
                 // Close help
                 self.show_help = false;
             }
-            AppMode::Normal | AppMode::ConfirmFileCreate | AppMode::ConfirmSaveWidth => {
+            AppMode::Normal
+            | AppMode::ConfirmFileCreate
+            | AppMode::ConfirmSaveWidth
+            | AppMode::ConfirmSaveBeforeQuit => {
                 // In normal mode, show hint for quitting
                 self.set_status_message("Press q to quit • : for commands • ? for help");
             }
@@ -886,7 +949,8 @@ impl App {
     }
 
     /// Handle confirm action based on current mode
-    fn handle_confirm_action(&mut self) {
+    /// Returns Some(ActionResult) if the action should return early (e.g., quit)
+    fn handle_confirm_action(&mut self) -> Option<ActionResult> {
         // Handle outline search - accept and keep filtered results visible
         if self.show_search && self.outline_search_active {
             // Check if there are any matches (filtered items with matching text)
@@ -910,7 +974,7 @@ impl App {
                 self.search_query.clear();
                 self.filter_outline(); // Restore full outline
             }
-            return;
+            return None;
         }
 
         match self.mode {
@@ -920,11 +984,23 @@ impl App {
                 }
             }
             AppMode::ConfirmSaveWidth => self.confirm_save_outline_width(),
+            AppMode::ConfirmSaveBeforeQuit => {
+                // Save pending changes and quit
+                if let Err(e) = self.save_pending_edits_to_file() {
+                    self.status_message = Some(format!("✗ Save failed: {}", e));
+                    self.mode = AppMode::Normal;
+                } else {
+                    return Some(ActionResult::Quit);
+                }
+            }
             AppMode::Search => self.show_search = false,
             AppMode::DocSearch => self.accept_doc_search(),
             AppMode::CommandPalette => {
                 // Execute command - Quit is handled separately
-                let _ = self.execute_selected_command();
+                let should_quit = self.execute_selected_command();
+                if should_quit {
+                    return Some(ActionResult::Quit);
+                }
             }
             AppMode::CellEdit => {
                 if let Err(e) = self.save_edited_cell() {
@@ -935,6 +1011,7 @@ impl App {
             }
             _ => {}
         }
+        None
     }
 
     /// Handle cancel action based on current mode
@@ -942,6 +1019,11 @@ impl App {
         match self.mode {
             AppMode::ConfirmFileCreate => self.cancel_file_create(),
             AppMode::ConfirmSaveWidth => self.cancel_save_width_confirmation(),
+            AppMode::ConfirmSaveBeforeQuit => {
+                // Cancel quit - go back to normal mode
+                self.mode = AppMode::Normal;
+                self.status_message = Some("Quit cancelled".to_string());
+            }
             _ => self.exit_current_mode(),
         }
     }
@@ -2353,7 +2435,27 @@ impl App {
                 }
                 false
             }
-            CommandAction::Quit => true,
+            CommandAction::SaveFile => {
+                if let Err(e) = self.save_pending_edits_to_file() {
+                    self.set_status_message(&format!("✗ Save failed: {}", e));
+                }
+                false
+            }
+            CommandAction::Undo => {
+                if let Err(e) = self.undo_last_edit() {
+                    self.set_status_message(&format!("✗ Undo failed: {}", e));
+                }
+                false
+            }
+            CommandAction::Quit => {
+                if self.has_unsaved_changes {
+                    // Show confirmation dialog instead of quitting immediately
+                    self.mode = AppMode::ConfirmSaveBeforeQuit;
+                    false
+                } else {
+                    true
+                }
+            }
         }
     }
 
@@ -3768,7 +3870,8 @@ impl App {
                         .unwrap_or_default()
                 };
 
-                self.cell_edit_value = cell_value;
+                self.cell_edit_value = cell_value.clone();
+                self.cell_edit_original_value = cell_value; // Store original for undo
                 self.cell_edit_row = row;
                 self.cell_edit_col = col;
                 self.mode = AppMode::CellEdit;
@@ -3785,66 +3888,60 @@ impl App {
             .replace(['\n', '\r'], " ") // Replace newlines and carriage returns
     }
 
-    /// Save the edited cell value back to the file
+    /// Buffer the edited cell value in memory (does not write to file)
+    /// Use save_pending_edits_to_file() to write changes to disk
     pub fn save_edited_cell(&mut self) -> Result<(), String> {
-        use std::fs;
-        use std::io::Write;
-
         // Sanitize the cell value to prevent table structure corruption
         let sanitized_value = Self::sanitize_table_cell(&self.cell_edit_value);
 
-        // Read the current file
-        let file_content = fs::read_to_string(&self.current_file_path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+        // Skip if no actual change was made
+        if sanitized_value == self.cell_edit_original_value {
+            self.status_message = Some("No changes made".to_string());
+            return Ok(());
+        }
 
-        // Find and replace the table cell in the markdown
-        let new_content = self.replace_table_cell_in_markdown(
-            &file_content,
+        // Calculate the table index for this edit
+        let table_index = self.calculate_current_table_index()?;
+
+        // Store the edit in the pending buffer for undo capability
+        let pending_edit = PendingEdit {
+            table_index,
+            row: self.cell_edit_row,
+            col: self.cell_edit_col,
+            original_value: self.cell_edit_original_value.clone(),
+            new_value: sanitized_value.clone(),
+        };
+        self.pending_edits.push(pending_edit);
+        self.has_unsaved_changes = true;
+
+        // Apply the edit to the in-memory document content
+        let new_content = self.replace_table_cell_in_file(
+            &self.document.content,
+            table_index,
             self.cell_edit_row,
             self.cell_edit_col,
             &sanitized_value,
         )?;
 
-        // Atomic write: write to temp file, then rename (prevents data corruption)
-        let parent_dir = self
-            .current_file_path
-            .parent()
-            .ok_or("Cannot determine parent directory")?;
+        // Update the in-memory document content
+        self.document.content = new_content;
 
-        let mut temp_file = tempfile::NamedTempFile::new_in(parent_dir)
-            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        // Re-parse headings if needed (table edits don't affect heading structure)
+        // The document tree stays the same, only content changed
 
-        temp_file
-            .write_all(new_content.as_bytes())
-            .map_err(|e| format!("Failed to write temp file: {}", e))?;
-
-        temp_file
-            .flush()
-            .map_err(|e| format!("Failed to flush temp file: {}", e))?;
-
-        // Atomic rename
-        temp_file
-            .persist(&self.current_file_path)
-            .map_err(|e| format!("Failed to save file: {}", e))?;
-
-        // Reload the document
-        let updated_document = crate::parser::parse_file(&self.current_file_path)
-            .map_err(|e| format!("Failed to reload document: {}", e))?;
-
-        self.document = updated_document;
-        self.status_message = Some("✓ Cell updated".to_string());
+        let edit_count = self.pending_edits.len();
+        self.status_message = Some(format!(
+            "✓ Cell updated ({} unsaved change{})",
+            edit_count,
+            if edit_count == 1 { "" } else { "s" }
+        ));
         Ok(())
     }
 
-    /// Replace a specific table cell in markdown content
-    fn replace_table_cell_in_markdown(
-        &self,
-        content: &str,
-        row: usize,
-        col: usize,
-        new_value: &str,
-    ) -> Result<String, String> {
+    /// Calculate the table index for the currently selected table element
+    fn calculate_current_table_index(&self) -> Result<usize, String> {
         use crate::parser::content::parse_content;
+        use crate::parser::output::Block;
 
         // Get the current section content to find the right table
         let section_content = if let Some(heading_text) = self.selected_heading_text() {
@@ -3862,19 +3959,125 @@ impl App {
         if let Some(element) = self.interactive_state.current_element() {
             let block_idx = element.id.block_idx;
 
-            if let Some(crate::parser::output::Block::Table { .. }) = blocks.get(block_idx) {
-                // Find this table in the full file content
-                return self.replace_table_cell_in_file(content, row, col, new_value);
+            if let Some(Block::Table { .. }) = blocks.get(block_idx) {
+                // Count tables before this one in the section
+                let tables_before_in_section: usize = blocks[..block_idx]
+                    .iter()
+                    .filter(|b| matches!(b, Block::Table { .. }))
+                    .count();
+
+                // Find where this section starts in the full file and count tables before it
+                let section_start = self.document.content.find(&section_content).unwrap_or(0);
+                let content_before_section = &self.document.content[..section_start];
+
+                // Count tables (groups of | lines) before section
+                let mut table_count_before = 0;
+                let mut in_table = false;
+                for line in content_before_section.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with('|') && trimmed.ends_with('|') {
+                        if !in_table {
+                            in_table = true;
+                            table_count_before += 1;
+                        }
+                    } else {
+                        in_table = false;
+                    }
+                }
+
+                return Ok(table_count_before + tables_before_in_section);
             }
         }
 
-        Err("Could not locate table in file".to_string())
+        Err("Could not locate table".to_string())
     }
 
-    /// Find and replace a cell in the first table found in the current section
+    /// Write all pending edits to the file
+    pub fn save_pending_edits_to_file(&mut self) -> Result<(), String> {
+        use std::io::Write;
+
+        if !self.has_unsaved_changes {
+            self.status_message = Some("No changes to save".to_string());
+            return Ok(());
+        }
+
+        // Atomic write: write to temp file, then rename (prevents data corruption)
+        let parent_dir = self
+            .current_file_path
+            .parent()
+            .ok_or("Cannot determine parent directory")?;
+
+        let mut temp_file = tempfile::NamedTempFile::new_in(parent_dir)
+            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+        temp_file
+            .write_all(self.document.content.as_bytes())
+            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+        temp_file
+            .flush()
+            .map_err(|e| format!("Failed to flush temp file: {}", e))?;
+
+        // Suppress file watcher for our own save
+        self.suppress_file_watch = true;
+
+        // Atomic rename
+        temp_file
+            .persist(&self.current_file_path)
+            .map_err(|e| format!("Failed to save file: {}", e))?;
+
+        // Clear the pending edits buffer
+        let edit_count = self.pending_edits.len();
+        self.pending_edits.clear();
+        self.has_unsaved_changes = false;
+
+        self.status_message = Some(format!(
+            "✓ Saved {} change{} to {}",
+            edit_count,
+            if edit_count == 1 { "" } else { "s" },
+            self.filename
+        ));
+        Ok(())
+    }
+
+    /// Undo the last pending edit
+    pub fn undo_last_edit(&mut self) -> Result<(), String> {
+        if let Some(edit) = self.pending_edits.pop() {
+            // Apply the original value back to the in-memory content
+            let new_content = self.replace_table_cell_in_file(
+                &self.document.content,
+                edit.table_index,
+                edit.row,
+                edit.col,
+                &edit.original_value,
+            )?;
+
+            self.document.content = new_content;
+            self.has_unsaved_changes = !self.pending_edits.is_empty();
+
+            if self.pending_edits.is_empty() {
+                self.status_message = Some("✓ Undone - no unsaved changes".to_string());
+            } else {
+                let remaining = self.pending_edits.len();
+                self.status_message = Some(format!(
+                    "✓ Undone ({} unsaved change{} remaining)",
+                    remaining,
+                    if remaining == 1 { "" } else { "s" }
+                ));
+            }
+            Ok(())
+        } else {
+            self.status_message = Some("Nothing to undo".to_string());
+            Ok(())
+        }
+    }
+
+    /// Find and replace a cell in a specific table
+    /// table_index: which table to modify (0-indexed among tables in the content)
     fn replace_table_cell_in_file(
         &self,
         content: &str,
+        table_index: usize,
         row: usize,
         col: usize,
         new_value: &str,
@@ -3883,7 +4086,8 @@ impl App {
         let mut result = Vec::new();
         let mut in_table = false;
         let mut table_row_idx = 0;
-        let mut found_table = false;
+        let mut current_table_index = 0;
+        let mut modified = false;
 
         for line in lines {
             let trimmed = line.trim();
@@ -3892,7 +4096,6 @@ impl App {
             if trimmed.starts_with('|') && trimmed.ends_with('|') {
                 if !in_table {
                     in_table = true;
-                    found_table = true;
                     table_row_idx = 0;
                 }
 
@@ -3902,12 +4105,12 @@ impl App {
                     continue;
                 }
 
-                // This is a data row in the table
-                if table_row_idx == row {
+                // Only modify the target table at the target row
+                if current_table_index == table_index && table_row_idx == row && !modified {
                     // Replace this row's cell
                     let new_line = self.replace_cell_in_row(line, col, new_value);
                     result.push(new_line);
-                    in_table = false; // Stop after modifying the target row
+                    modified = true;
                 } else {
                     result.push(line.to_string());
                 }
@@ -3915,16 +4118,21 @@ impl App {
                 table_row_idx += 1;
             } else {
                 if in_table {
+                    // Exiting a table - increment table counter
                     in_table = false;
+                    current_table_index += 1;
                 }
                 result.push(line.to_string());
             }
         }
 
-        if found_table {
+        if modified {
             Ok(result.join("\n"))
         } else {
-            Err("Table not found in file".to_string())
+            Err(format!(
+                "Table {} not found or row {} not found",
+                table_index, row
+            ))
         }
     }
 

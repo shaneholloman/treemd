@@ -117,6 +117,8 @@ pub enum Action {
     GoForward,
     /// Open current file in external editor
     OpenInEditor,
+    /// Undo last table cell edit
+    UndoEdit,
 
     // === Dialog Actions ===
     /// Confirm action in dialog
@@ -252,6 +254,7 @@ impl Action {
             Action::GoBack => "Go back",
             Action::GoForward => "Go forward",
             Action::OpenInEditor => "Open in editor",
+            Action::UndoEdit => "Undo last edit",
 
             // Dialog
             Action::ConfirmAction => "Confirm",
@@ -357,7 +360,7 @@ impl Action {
 
             Action::CopyContent | Action::CopyAnchor => "Clipboard",
 
-            Action::GoBack | Action::GoForward | Action::OpenInEditor => "Files",
+            Action::GoBack | Action::GoForward | Action::OpenInEditor | Action::UndoEdit => "Files",
 
             Action::ConfirmAction | Action::CancelAction => "Dialog",
 

@@ -214,6 +214,9 @@ fn add_interactive_mode(kb: &mut Keybindings) {
     // Clipboard
     bind(kb, Interactive, "y", CopyContent);
 
+    // Undo last edit
+    bind(kb, Interactive, "Ctrl+z", UndoEdit);
+
     // Quit
     bind(kb, Interactive, "q", Quit);
 }
@@ -244,6 +247,9 @@ fn add_interactive_table_mode(kb: &mut Keybindings) {
 
     // Activate (follow link or edit cell)
     bind(kb, InteractiveTable, "Enter", InteractiveActivate);
+
+    // Undo last edit
+    bind(kb, InteractiveTable, "Ctrl+z", UndoEdit);
 
     // Quit
     bind(kb, InteractiveTable, "q", Quit);
