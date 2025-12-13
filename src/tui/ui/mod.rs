@@ -342,14 +342,12 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
         render_raw_markdown(&content_text, theme)
     } else {
         // Enhanced markdown rendering with syntax highlighting
-        // Pass interactive state if in interactive mode
-        let (selected_element_id, interactive_state_ref) = if app.mode == AppMode::Interactive {
-            (
-                app.interactive_state.current_element().map(|elem| elem.id),
-                Some(&app.interactive_state),
-            )
+        // Always pass interactive state for expansion persistence
+        // Only show selection highlight in Interactive mode
+        let selected_element_id = if app.mode == AppMode::Interactive {
+            app.interactive_state.current_element().map(|elem| elem.id)
         } else {
-            (None, None)
+            None
         };
 
         render_markdown_enhanced(
@@ -357,7 +355,7 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
             &app.highlighter,
             theme,
             selected_element_id,
-            interactive_state_ref,
+            Some(&app.interactive_state), // Always pass for expansion state
         )
     };
 
@@ -417,7 +415,24 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let status_text = if app.mode == AppMode::LinkFollow {
+    let status_text = if app.mode == AppMode::Interactive {
+        // Interactive mode status with position info
+        let total = app.interactive_state.elements.len();
+        let current = app.interactive_state.current_index.map(|i| i + 1).unwrap_or(0);
+        let percentage = if total > 0 && current > 0 {
+            current * 100 / total
+        } else {
+            0
+        };
+
+        // Get element-specific hint
+        let element_hint = app.interactive_state.get_status_hint();
+
+        format!(
+            " [INTERACTIVE] {}/{} ({}%) • {} • j/k:Navigate • Enter/Space:Action • Esc:Exit ",
+            current, total, percentage, element_hint
+        )
+    } else if app.mode == AppMode::LinkFollow {
         // Link follow mode status
         let link_count = app.links_in_view.len();
         let selected = app.selected_link_idx.map(|i| i + 1).unwrap_or(0);
@@ -514,7 +529,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let raw_indicator = if app.show_raw_source { " [RAW]" } else { "" };
     let status_text = format!("{}{}{}", status_text, theme_name, raw_indicator);
 
-    let status_style = if app.mode == AppMode::LinkFollow {
+    let status_style = if app.mode == AppMode::Interactive {
+        Style::default()
+            .bg(Color::Rgb(80, 60, 120))
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else if app.mode == AppMode::LinkFollow {
         Style::default()
             .bg(Color::Rgb(0, 100, 0))
             .fg(Color::White)
@@ -530,6 +550,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 use crate::parser::content::parse_content;
 use crate::parser::output::{Block as ContentBlock, InlineElement};
+use crate::parser::utils::parse_inline_html;
 use crate::tui::syntax::SyntaxHighlighter;
 
 /// Render raw markdown source with line numbers
@@ -994,23 +1015,115 @@ fn render_markdown_enhanced(
                     indicator,
                     Style::default().fg(theme.list_bullet),
                 ));
-                summary_spans.push(Span::styled(
-                    summary.clone(),
-                    Style::default()
-                        .fg(theme.heading_color(3))
-                        .add_modifier(Modifier::BOLD),
-                ));
+
+                // Parse and render inline HTML in summary (e.g., <strong>Navigation</strong>)
+                let summary_elements = parse_inline_html(summary);
+                let rendered_summary = render_inline_elements(&summary_elements, theme, None);
+                summary_spans.extend(rendered_summary);
 
                 lines.push(Line::from(summary_spans));
 
                 // Only render nested content if expanded
                 if is_expanded {
-                    for nested_block in nested {
-                        let nested_lines = render_block_to_lines(nested_block, highlighter, theme);
-                        for nested_line in nested_lines {
-                            let mut spans = vec![Span::raw("  ")]; // Indent
-                            spans.extend(nested_line.spans);
-                            lines.push(Line::from(spans));
+                    for (nested_idx, nested_block) in nested.iter().enumerate() {
+                        // Check if this nested block is selected
+                        let nested_sub_idx = crate::tui::interactive::DETAILS_NESTED_BASE
+                            + nested_idx * crate::tui::interactive::DETAILS_NESTED_MULTIPLIER;
+
+                        // Check various offsets for different block types
+                        let table_id =
+                            nested_sub_idx + crate::tui::interactive::TABLE_OFFSET;
+                        let code_id =
+                            nested_sub_idx + crate::tui::interactive::CODE_BLOCK_OFFSET;
+                        let image_id =
+                            nested_sub_idx + crate::tui::interactive::IMAGE_OFFSET;
+
+                        let is_nested_selected = selected_element_id
+                            .map(|sel_id| {
+                                sel_id.block_idx == block_idx
+                                    && sel_id.sub_idx.map_or(false, |sub| {
+                                        sub == table_id
+                                            || sub == code_id
+                                            || sub == image_id
+                                            || (sub
+                                                >= nested_sub_idx
+                                                    + crate::tui::interactive::LINK_OFFSET
+                                                && sub
+                                                    < nested_sub_idx
+                                                        + crate::tui::interactive::LINK_OFFSET
+                                                        + 100)
+                                    })
+                            })
+                            .unwrap_or(false);
+
+                        // Handle tables specially to preserve interactive rendering
+                        if let ContentBlock::Table {
+                            headers: nested_headers,
+                            alignments: nested_alignments,
+                            rows: nested_rows,
+                        } = nested_block
+                        {
+                            // Check if this specific table is selected and in table mode
+                            let is_this_table_selected = selected_element_id
+                                .map(|sel_id| {
+                                    sel_id.block_idx == block_idx
+                                        && sel_id.sub_idx == Some(table_id)
+                                })
+                                .unwrap_or(false);
+
+                            let (in_table_mode, selected_cell) = if is_this_table_selected {
+                                let in_mode = interactive_state
+                                    .map(|state| state.is_in_table_mode())
+                                    .unwrap_or(false);
+                                let cell = if in_mode {
+                                    interactive_state
+                                        .and_then(|state| state.get_table_position())
+                                } else {
+                                    None
+                                };
+                                (in_mode, cell)
+                            } else {
+                                (false, None)
+                            };
+
+                            let table_lines = render_table(
+                                nested_headers,
+                                nested_alignments,
+                                nested_rows,
+                                theme,
+                                is_this_table_selected,
+                                in_table_mode,
+                                selected_cell,
+                            );
+
+                            for nested_line in table_lines {
+                                let mut spans = vec![Span::raw("  ")]; // Indent
+                                spans.extend(nested_line.spans);
+                                lines.push(Line::from(spans));
+                            }
+                        } else {
+                            // Other block types use the standard renderer
+                            let nested_lines =
+                                render_block_to_lines(nested_block, highlighter, theme);
+                            for (line_idx, nested_line) in nested_lines.into_iter().enumerate() {
+                                let mut spans = vec![];
+
+                                // Add selection indicator for first line of selected nested block
+                                if is_nested_selected && line_idx == 0 {
+                                    spans.push(Span::styled(
+                                        "→ ",
+                                        Style::default()
+                                            .fg(theme.selection_indicator_fg)
+                                            .bg(theme.selection_indicator_bg)
+                                            .add_modifier(Modifier::BOLD),
+                                    ));
+                                } else {
+                                    spans.push(Span::raw("  ")); // Indent
+                                }
+
+                                spans.extend(nested_line.spans);
+                                lines.push(Line::from(spans));
+                            }
                         }
                     }
                 }
@@ -1242,15 +1355,13 @@ fn render_block_to_lines(
             ..
         } => {
             // Render details with collapsed indicator
-            let summary_spans = vec![
-                Span::styled("▶ ", Style::default().fg(theme.list_bullet)),
-                Span::styled(
-                    summary.clone(),
-                    Style::default()
-                        .fg(theme.heading_color(3))
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ];
+            let mut summary_spans = vec![Span::styled("▶ ", Style::default().fg(theme.list_bullet))];
+
+            // Parse and render inline HTML in summary (e.g., <strong>Navigation</strong>)
+            let summary_elements = parse_inline_html(summary);
+            let rendered_summary = render_inline_elements(&summary_elements, theme, None);
+            summary_spans.extend(rendered_summary);
+
             lines.push(Line::from(summary_spans));
 
             // Render nested content (indented)
@@ -1263,9 +1374,85 @@ fn render_block_to_lines(
                 }
             }
         }
-        _ => {
-            // For other blocks, use simple text rendering
-            lines.push(Line::from(vec![Span::raw("")]));
+        ContentBlock::Table {
+            headers,
+            alignments,
+            rows,
+        } => {
+            // Render table (non-interactive, no selection)
+            let table_lines = render_table(headers, alignments, rows, theme, false, false, None);
+            lines.extend(table_lines);
+        }
+        ContentBlock::List { ordered, items } => {
+            for (i, item) in items.iter().enumerate() {
+                let marker = if *ordered {
+                    format!("{}. ", i + 1)
+                } else {
+                    "• ".to_string()
+                };
+
+                // Render item content
+                let item_spans = if !item.inline.is_empty() {
+                    render_inline_elements(&item.inline, theme, None)
+                } else {
+                    format_inline_markdown(&item.content, theme)
+                };
+
+                let mut line_spans = vec![Span::styled(marker, Style::default().fg(theme.list_bullet))];
+                line_spans.extend(item_spans);
+                lines.push(Line::from(line_spans));
+
+                // Render nested blocks (indented)
+                for nested in &item.blocks {
+                    let nested_lines = render_block_to_lines(nested, highlighter, theme);
+                    for nested_line in nested_lines {
+                        let mut spans = vec![Span::raw("  ")];
+                        spans.extend(nested_line.spans);
+                        lines.push(Line::from(spans));
+                    }
+                }
+            }
+        }
+        ContentBlock::Blockquote { content, blocks } => {
+            // Render blockquote with > prefix
+            let formatted = format_inline_markdown(content, theme);
+            let mut quote_spans = vec![Span::styled(
+                "│ ",
+                Style::default().fg(theme.blockquote_border),
+            )];
+            quote_spans.extend(formatted);
+            lines.push(Line::from(quote_spans));
+
+            // Render nested blocks
+            for nested in blocks {
+                let nested_lines = render_block_to_lines(nested, highlighter, theme);
+                for nested_line in nested_lines {
+                    let mut spans = vec![Span::styled(
+                        "│ ",
+                        Style::default().fg(theme.blockquote_border),
+                    )];
+                    spans.extend(nested_line.spans);
+                    lines.push(Line::from(spans));
+                }
+            }
+        }
+        ContentBlock::Image { alt, src, .. } => {
+            let image_spans = vec![
+                Span::styled("🖼 ", Style::default().fg(theme.link_fg)),
+                Span::styled(
+                    format!("{} ({})", alt, src),
+                    Style::default()
+                        .fg(theme.link_fg)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+            ];
+            lines.push(Line::from(image_spans));
+        }
+        ContentBlock::HorizontalRule => {
+            lines.push(Line::from(vec![Span::styled(
+                "─".repeat(40),
+                Style::default().fg(Color::Rgb(80, 80, 100)),
+            )]));
         }
     }
 

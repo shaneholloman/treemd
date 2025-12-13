@@ -217,4 +217,40 @@ Also [[Another Valid]]
         assert_eq!(slugify("API Reference"), "api-reference");
         assert_eq!(slugify("1. Getting Started"), "1-getting-started");
     }
+
+    #[test]
+    fn test_details_block_with_table() {
+        let markdown = r#"<details>
+<summary><strong>Navigation</strong></summary>
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move down/up |
+| `g` | Jump to top |
+
+</details>"#;
+
+        let blocks = parse_content(markdown, 0);
+
+        assert_eq!(blocks.len(), 1, "Should have 1 details block");
+
+        if let Block::Details {
+            summary,
+            blocks: nested,
+            ..
+        } = &blocks[0]
+        {
+            assert_eq!(summary, "<strong>Navigation</strong>");
+            assert!(
+                !nested.is_empty(),
+                "Details should have nested blocks (table)"
+            );
+
+            // Check that we have a table inside
+            let has_table = nested.iter().any(|b| matches!(b, Block::Table { .. }));
+            assert!(has_table, "Details should contain a table");
+        } else {
+            panic!("Expected Details block, got {:?}", blocks[0]);
+        }
+    }
 }

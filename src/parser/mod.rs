@@ -17,7 +17,7 @@ pub use builder::build_json_output;
 pub use document::{Document, Heading, HeadingNode};
 pub use links::{Link, LinkTarget, extract_links};
 pub use output::{Block, DocumentOutput, InlineElement, Section};
-pub use utils::strip_markdown_inline;
+pub use utils::{parse_inline_html, strip_markdown_inline};
 
 use std::path::Path;
 

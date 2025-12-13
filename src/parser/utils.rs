@@ -2,6 +2,8 @@
 //!
 //! Shared helper functions used across the parser module.
 
+use crate::parser::output::InlineElement;
+
 /// Strip inline markdown formatting (bold, italic, code, strikethrough) from text.
 ///
 /// This is useful when comparing heading text extracted from events (which strips formatting)
@@ -42,6 +44,168 @@ pub fn strip_markdown_inline(text: &str) -> String {
         result = pattern.replace_all(&result, *replacement).to_string();
     }
     result
+}
+
+/// Parse inline HTML tags into InlineElements.
+///
+/// Converts HTML tags like `<strong>`, `<b>`, `<em>`, `<i>`, `<code>` into
+/// their corresponding InlineElement types for proper rendering.
+///
+/// # Examples
+///
+/// ```
+/// # use treemd::parser::utils::parse_inline_html;
+/// let elements = parse_inline_html("<strong>Navigation</strong>");
+/// assert_eq!(elements.len(), 1);
+/// ```
+pub fn parse_inline_html(html: &str) -> Vec<InlineElement> {
+    use regex::Regex;
+    use std::sync::OnceLock;
+
+    // Pattern for each tag type (can't use backreferences in Rust regex)
+    static STRONG_PATTERN: OnceLock<Regex> = OnceLock::new();
+    static B_PATTERN: OnceLock<Regex> = OnceLock::new();
+    static EM_PATTERN: OnceLock<Regex> = OnceLock::new();
+    static I_PATTERN: OnceLock<Regex> = OnceLock::new();
+    static CODE_PATTERN: OnceLock<Regex> = OnceLock::new();
+
+    let strong_re = STRONG_PATTERN.get_or_init(|| Regex::new(r"<strong>(.*?)</strong>").unwrap());
+    let b_re = B_PATTERN.get_or_init(|| Regex::new(r"<b>(.*?)</b>").unwrap());
+    let em_re = EM_PATTERN.get_or_init(|| Regex::new(r"<em>(.*?)</em>").unwrap());
+    let i_re = I_PATTERN.get_or_init(|| Regex::new(r"<i>(.*?)</i>").unwrap());
+    let code_re = CODE_PATTERN.get_or_init(|| Regex::new(r"<code>(.*?)</code>").unwrap());
+
+    // Collect all matches with their positions and types
+    #[derive(Debug)]
+    struct TagMatch {
+        start: usize,
+        end: usize,
+        content: String,
+        tag_type: TagType,
+    }
+
+    #[derive(Debug)]
+    enum TagType {
+        Strong,
+        Emphasis,
+        Code,
+    }
+
+    let mut matches: Vec<TagMatch> = Vec::new();
+
+    // Find all strong tags
+    for cap in strong_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        matches.push(TagMatch {
+            start: m.start(),
+            end: m.end(),
+            content: cap.get(1).unwrap().as_str().to_string(),
+            tag_type: TagType::Strong,
+        });
+    }
+
+    // Find all b tags
+    for cap in b_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        matches.push(TagMatch {
+            start: m.start(),
+            end: m.end(),
+            content: cap.get(1).unwrap().as_str().to_string(),
+            tag_type: TagType::Strong,
+        });
+    }
+
+    // Find all em tags
+    for cap in em_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        matches.push(TagMatch {
+            start: m.start(),
+            end: m.end(),
+            content: cap.get(1).unwrap().as_str().to_string(),
+            tag_type: TagType::Emphasis,
+        });
+    }
+
+    // Find all i tags
+    for cap in i_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        matches.push(TagMatch {
+            start: m.start(),
+            end: m.end(),
+            content: cap.get(1).unwrap().as_str().to_string(),
+            tag_type: TagType::Emphasis,
+        });
+    }
+
+    // Find all code tags
+    for cap in code_re.captures_iter(html) {
+        let m = cap.get(0).unwrap();
+        matches.push(TagMatch {
+            start: m.start(),
+            end: m.end(),
+            content: cap.get(1).unwrap().as_str().to_string(),
+            tag_type: TagType::Code,
+        });
+    }
+
+    // Sort by position
+    matches.sort_by_key(|m| m.start);
+
+    // Build elements
+    let mut elements = Vec::new();
+    let mut last_end = 0;
+
+    for tag_match in matches {
+        // Add any text before this tag
+        if tag_match.start > last_end {
+            let text = &html[last_end..tag_match.start];
+            if !text.is_empty() {
+                elements.push(InlineElement::Text {
+                    value: text.to_string(),
+                });
+            }
+        }
+
+        // Add the styled element
+        match tag_match.tag_type {
+            TagType::Strong => {
+                elements.push(InlineElement::Strong {
+                    value: tag_match.content,
+                });
+            }
+            TagType::Emphasis => {
+                elements.push(InlineElement::Emphasis {
+                    value: tag_match.content,
+                });
+            }
+            TagType::Code => {
+                elements.push(InlineElement::Code {
+                    value: tag_match.content,
+                });
+            }
+        }
+
+        last_end = tag_match.end;
+    }
+
+    // Add any remaining text after the last tag
+    if last_end < html.len() {
+        let text = &html[last_end..];
+        if !text.is_empty() {
+            elements.push(InlineElement::Text {
+                value: text.to_string(),
+            });
+        }
+    }
+
+    // If no tags were found, return the whole string as text
+    if elements.is_empty() && !html.is_empty() {
+        elements.push(InlineElement::Text {
+            value: html.to_string(),
+        });
+    }
+
+    elements
 }
 
 /// Extract the heading level from a line of markdown text.
@@ -122,5 +286,49 @@ mod tests {
         assert_eq!(get_heading_level("#NoSpace"), None);
         assert_eq!(get_heading_level("####### Too many"), None);
         assert_eq!(get_heading_level("  ## Indented"), Some(2)); // Trimmed
+    }
+
+    #[test]
+    fn test_parse_inline_html_strong() {
+        let elements = parse_inline_html("<strong>Navigation</strong>");
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], InlineElement::Strong { value } if value == "Navigation"));
+    }
+
+    #[test]
+    fn test_parse_inline_html_bold() {
+        let elements = parse_inline_html("<b>Bold text</b>");
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], InlineElement::Strong { value } if value == "Bold text"));
+    }
+
+    #[test]
+    fn test_parse_inline_html_emphasis() {
+        let elements = parse_inline_html("<em>Italic</em>");
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], InlineElement::Emphasis { value } if value == "Italic"));
+    }
+
+    #[test]
+    fn test_parse_inline_html_code() {
+        let elements = parse_inline_html("<code>fn main()</code>");
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], InlineElement::Code { value } if value == "fn main()"));
+    }
+
+    #[test]
+    fn test_parse_inline_html_mixed() {
+        let elements = parse_inline_html("Before <strong>bold</strong> after");
+        assert_eq!(elements.len(), 3);
+        assert!(matches!(&elements[0], InlineElement::Text { value } if value == "Before "));
+        assert!(matches!(&elements[1], InlineElement::Strong { value } if value == "bold"));
+        assert!(matches!(&elements[2], InlineElement::Text { value } if value == " after"));
+    }
+
+    #[test]
+    fn test_parse_inline_html_plain_text() {
+        let elements = parse_inline_html("No HTML here");
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], InlineElement::Text { value } if value == "No HTML here"));
     }
 }

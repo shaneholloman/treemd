@@ -601,14 +601,32 @@ impl App {
 
             // === Interactive Mode ===
             InteractiveNext => {
-                self.interactive_state.next();
-                self.scroll_to_interactive_element(20);
-                self.status_message = Some(self.interactive_state.status_text());
+                if self.interactive_state.is_in_table_mode() {
+                    // In table mode, move down within table
+                    let (rows, cols) = self.get_table_dimensions();
+                    self.interactive_state.table_move_down(rows);
+                    self.status_message =
+                        Some(self.interactive_state.table_status_text(rows + 1, cols));
+                } else {
+                    // Normal interactive mode, move to next element
+                    self.interactive_state.next();
+                    self.scroll_to_interactive_element(20);
+                    self.status_message = Some(self.interactive_state.status_text());
+                }
             }
             InteractivePrevious => {
-                self.interactive_state.previous();
-                self.scroll_to_interactive_element(20);
-                self.status_message = Some(self.interactive_state.status_text());
+                if self.interactive_state.is_in_table_mode() {
+                    // In table mode, move up within table
+                    let (rows, cols) = self.get_table_dimensions();
+                    self.interactive_state.table_move_up();
+                    self.status_message =
+                        Some(self.interactive_state.table_status_text(rows + 1, cols));
+                } else {
+                    // Normal interactive mode, move to previous element
+                    self.interactive_state.previous();
+                    self.scroll_to_interactive_element(20);
+                    self.status_message = Some(self.interactive_state.status_text());
+                }
             }
             InteractiveActivate => {
                 if let Err(e) = self.activate_interactive_element() {
@@ -720,7 +738,15 @@ impl App {
         }
 
         match self.mode {
-            AppMode::Interactive => self.exit_interactive_mode(),
+            AppMode::Interactive => {
+                // If in table mode, exit table mode first (stay in interactive)
+                if self.interactive_state.is_in_table_mode() {
+                    self.interactive_state.exit_table_mode();
+                    self.status_message = Some(self.interactive_state.status_text());
+                } else {
+                    self.exit_interactive_mode();
+                }
+            }
             AppMode::LinkFollow => {
                 if self.link_search_active {
                     self.stop_link_search();

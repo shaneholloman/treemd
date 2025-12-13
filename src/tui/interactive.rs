@@ -29,6 +29,12 @@ pub const TABLE_OFFSET: usize = 6000;
 /// Offset for images nested in list items
 pub const IMAGE_OFFSET: usize = 7000;
 
+// Sub-index encoding constants for nested elements within details blocks
+/// Base offset for elements nested inside details blocks
+pub const DETAILS_NESTED_BASE: usize = 100000;
+/// Multiplier for nested block index within details
+pub const DETAILS_NESTED_MULTIPLIER: usize = 100;
+
 /// Interactive navigation state
 #[derive(Debug, Clone)]
 pub struct InteractiveState {
@@ -157,8 +163,10 @@ impl InteractiveState {
                         sub_idx: None,
                     };
 
+                    let is_expanded = self.is_details_expanded(id);
+
                     // Count lines for this details block
-                    let lines = 1 + if self.is_details_expanded(id) {
+                    let lines = 1 + if is_expanded {
                         count_block_lines(nested)
                     } else {
                         0
@@ -178,7 +186,154 @@ impl InteractiveState {
                         .entry(id)
                         .or_insert(ElementState::Details { expanded: false });
 
-                    current_line += lines;
+                    current_line += 1; // Details summary line
+
+                    // If expanded, index nested interactive elements
+                    if is_expanded {
+                        for (nested_idx, nested_block) in nested.iter().enumerate() {
+                            let nested_start_line = current_line;
+                            let nested_base =
+                                DETAILS_NESTED_BASE + nested_idx * DETAILS_NESTED_MULTIPLIER;
+
+                            match nested_block {
+                                Block::Table { headers, rows, .. } => {
+                                    let nested_id = ElementId {
+                                        block_idx,
+                                        sub_idx: Some(nested_base + TABLE_OFFSET),
+                                    };
+
+                                    let table_lines = 3 + rows.len();
+
+                                    self.elements.push(InteractiveElement {
+                                        id: nested_id,
+                                        element_type: ElementType::Table {
+                                            rows: rows.len(),
+                                            cols: headers.len(),
+                                            block_idx,
+                                        },
+                                        line_range: (
+                                            nested_start_line,
+                                            nested_start_line + table_lines,
+                                        ),
+                                    });
+
+                                    self.element_states
+                                        .entry(nested_id)
+                                        .or_insert(ElementState::Table {
+                                            selected_row: 0,
+                                            selected_col: 0,
+                                        });
+
+                                    current_line += table_lines;
+                                }
+                                Block::Code {
+                                    language, content, ..
+                                } => {
+                                    let nested_id = ElementId {
+                                        block_idx,
+                                        sub_idx: Some(nested_base + CODE_BLOCK_OFFSET),
+                                    };
+
+                                    let code_lines = 2 + content.lines().count();
+
+                                    self.elements.push(InteractiveElement {
+                                        id: nested_id,
+                                        element_type: ElementType::CodeBlock {
+                                            language: language.clone(),
+                                            content: content.clone(),
+                                            block_idx,
+                                        },
+                                        line_range: (
+                                            nested_start_line,
+                                            nested_start_line + code_lines,
+                                        ),
+                                    });
+
+                                    current_line += code_lines;
+                                }
+                                Block::Image { alt, src, .. } => {
+                                    let nested_id = ElementId {
+                                        block_idx,
+                                        sub_idx: Some(nested_base + IMAGE_OFFSET),
+                                    };
+
+                                    self.elements.push(InteractiveElement {
+                                        id: nested_id,
+                                        element_type: ElementType::Image {
+                                            alt: alt.clone(),
+                                            src: src.clone(),
+                                            block_idx,
+                                        },
+                                        line_range: (nested_start_line, nested_start_line + 1),
+                                    });
+
+                                    current_line += 1;
+                                }
+                                Block::Paragraph { inline, .. } => {
+                                    // Extract links from nested paragraphs
+                                    for (inline_idx, inline_elem) in inline.iter().enumerate() {
+                                        if let InlineElement::Link { text, url, .. } = inline_elem {
+                                            let nested_id = ElementId {
+                                                block_idx,
+                                                sub_idx: Some(
+                                                    nested_base + LINK_OFFSET + inline_idx,
+                                                ),
+                                            };
+
+                                            let target =
+                                                if let Some(wikilink_target) =
+                                                    url.strip_prefix("wikilink:")
+                                                {
+                                                    LinkTarget::WikiLink {
+                                                        target: wikilink_target.to_string(),
+                                                        alias: if text != wikilink_target {
+                                                            Some(text.clone())
+                                                        } else {
+                                                            None
+                                                        },
+                                                    }
+                                                } else if let Some(anchor) = url.strip_prefix('#') {
+                                                    LinkTarget::Anchor(anchor.to_string())
+                                                } else if url.starts_with("http://")
+                                                    || url.starts_with("https://")
+                                                {
+                                                    LinkTarget::External(url.clone())
+                                                } else if let Some((path, anchor)) =
+                                                    url.split_once('#')
+                                                {
+                                                    LinkTarget::RelativeFile {
+                                                        path: path.into(),
+                                                        anchor: Some(anchor.to_string()),
+                                                    }
+                                                } else {
+                                                    LinkTarget::RelativeFile {
+                                                        path: url.into(),
+                                                        anchor: None,
+                                                    }
+                                                };
+
+                                            self.elements.push(InteractiveElement {
+                                                id: nested_id,
+                                                element_type: ElementType::Link {
+                                                    link: Link::new(text.clone(), target, 0),
+                                                    line_idx: nested_start_line,
+                                                },
+                                                line_range: (
+                                                    nested_start_line,
+                                                    nested_start_line + 1,
+                                                ),
+                                            });
+                                        }
+                                    }
+                                    current_line += 1;
+                                }
+                                _ => {
+                                    // Other block types - just count lines
+                                    current_line += count_single_block_lines(nested_block);
+                                }
+                            }
+                        }
+                    }
                 }
                 Block::Paragraph { inline, .. } => {
                     // Extract links from inline elements (track index for selection highlighting)
@@ -590,6 +745,115 @@ impl InteractiveState {
         }
     }
 
+    /// Check if an element is nested inside a details block
+    fn is_nested_in_details(&self, element: &InteractiveElement) -> bool {
+        element
+            .id
+            .sub_idx
+            .map(|idx| idx >= DETAILS_NESTED_BASE)
+            .unwrap_or(false)
+    }
+
+    /// Find the parent details block for a nested element
+    fn find_parent_details(&self, element: &InteractiveElement) -> Option<&InteractiveElement> {
+        if !self.is_nested_in_details(element) {
+            return None;
+        }
+
+        // Find the details block with the same block_idx and no sub_idx
+        self.elements.iter().find(|e| {
+            e.id.block_idx == element.id.block_idx
+                && e.id.sub_idx.is_none()
+                && matches!(e.element_type, ElementType::Details { .. })
+        })
+    }
+
+    /// Get a short hint about the current element type for status bar
+    pub fn get_status_hint(&self) -> String {
+        if let Some(element) = self.current_element() {
+            // Check if nested inside a details block
+            let prefix = if let Some(parent) = self.find_parent_details(element) {
+                if let ElementType::Details { summary, .. } = &parent.element_type {
+                    // Strip HTML tags and truncate
+                    let clean_summary = summary
+                        .replace("<strong>", "")
+                        .replace("</strong>", "")
+                        .replace("<b>", "")
+                        .replace("</b>", "")
+                        .replace("<em>", "")
+                        .replace("</em>", "");
+                    let display = if clean_summary.len() > 15 {
+                        format!("{}...", &clean_summary[..12])
+                    } else {
+                        clean_summary
+                    };
+                    format!("▸{} > ", display)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+
+            let element_hint = match &element.element_type {
+                ElementType::Details { summary, .. } => {
+                    // Strip HTML tags and truncate for display
+                    let clean_summary = summary
+                        .replace("<strong>", "")
+                        .replace("</strong>", "")
+                        .replace("<b>", "")
+                        .replace("</b>", "")
+                        .replace("<em>", "")
+                        .replace("</em>", "");
+                    let display = if clean_summary.len() > 20 {
+                        format!("{}...", &clean_summary[..17])
+                    } else {
+                        clean_summary
+                    };
+                    format!("▸ {}", display)
+                }
+                ElementType::Link { link, .. } => {
+                    let text = if link.text.len() > 20 {
+                        format!("{}...", &link.text[..17])
+                    } else {
+                        link.text.clone()
+                    };
+                    format!("Link: {}", text)
+                }
+                ElementType::Checkbox { content, checked, .. } => {
+                    let mark = if *checked { "☑" } else { "☐" };
+                    let text = if content.len() > 15 {
+                        format!("{}...", &content[..12])
+                    } else {
+                        content.clone()
+                    };
+                    format!("{} {}", mark, text)
+                }
+                ElementType::CodeBlock { language, .. } => {
+                    let lang = language.as_deref().unwrap_or("code");
+                    format!("Code: {}", lang)
+                }
+                ElementType::Table { rows, cols, .. } => {
+                    format!("Table: {}×{}", rows, cols)
+                }
+                ElementType::Image { alt, .. } => {
+                    let text = if alt.len() > 20 {
+                        format!("{}...", &alt[..17])
+                    } else {
+                        alt.clone()
+                    };
+                    format!("Image: {}", text)
+                }
+            };
+
+            format!("{}{}", prefix, element_hint)
+        } else if self.elements.is_empty() {
+            "No elements".to_string()
+        } else {
+            "Select element".to_string()
+        }
+    }
+
     /// Enter interactive mode (select first element)
     pub fn enter(&mut self) {
         if !self.elements.is_empty() {
@@ -727,7 +991,8 @@ impl InteractiveState {
                 if let Some(ElementState::Table { selected_row, .. }) =
                     self.element_states.get_mut(&id)
                 {
-                    if *selected_row < rows - 1 {
+                    // rows is data row count; row 0 is header, so valid rows are 0..=rows
+                    if *selected_row < rows {
                         *selected_row += 1;
                     }
                 }
