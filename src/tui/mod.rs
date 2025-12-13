@@ -150,39 +150,68 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                 let handled = handle_text_input(&mut app, key.code, key.modifiers);
 
                 if !handled {
-                    // Try to get an action from the keybinding system
-                    if let Some(action) = app.get_action_for_key(key.code, key.modifiers) {
-                        // Special handling for CommandPalette confirm - it may return Quit
-                        if action == Action::ConfirmAction
-                            && app.mode == app::AppMode::CommandPalette
+                    // Handle vim-style count prefix (digits before motion commands)
+                    // Only in modes where count makes sense (Normal, Interactive)
+                    // Skip in LinkFollow mode where 1-9 jump to links
+                    let digit_handled = if let KeyCode::Char(c) = key.code {
+                        if c.is_ascii_digit()
+                            && key.modifiers.is_empty()
+                            && matches!(
+                                app.mode,
+                                app::AppMode::Normal | app::AppMode::Interactive
+                            )
                         {
-                            if app.execute_selected_command() {
-                                return Ok(()); // Quit command executed
+                            // Special case: '0' without existing count goes to start (like vim)
+                            if c == '0' && !app.has_count() {
+                                false // Let '0' be handled as a motion (go to first)
+                            } else {
+                                app.accumulate_count_digit(c)
                             }
                         } else {
-                            match app.execute_action(action) {
-                                ActionResult::Quit => return Ok(()),
-                                ActionResult::RunEditor(path, line) => {
-                                    match run_editor(terminal, &path, line) {
-                                        Ok(_) => {
-                                            if let Err(e) = app.reload_current_file() {
-                                                app.status_message =
-                                                    Some(format!("✗ Failed to reload: {}", e));
-                                            } else {
-                                                app.status_message = Some(
-                                                    "✓ File reloaded after editing".to_string(),
-                                                );
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if !digit_handled {
+                        // Try to get an action from the keybinding system
+                        if let Some(action) = app.get_action_for_key(key.code, key.modifiers) {
+                            // Special handling for CommandPalette confirm - it may return Quit
+                            if action == Action::ConfirmAction
+                                && app.mode == app::AppMode::CommandPalette
+                            {
+                                if app.execute_selected_command() {
+                                    return Ok(()); // Quit command executed
+                                }
+                            } else {
+                                match app.execute_action(action) {
+                                    ActionResult::Quit => return Ok(()),
+                                    ActionResult::RunEditor(path, line) => {
+                                        match run_editor(terminal, &path, line) {
+                                            Ok(_) => {
+                                                if let Err(e) = app.reload_current_file() {
+                                                    app.status_message =
+                                                        Some(format!("✗ Failed to reload: {}", e));
+                                                } else {
+                                                    app.status_message = Some(
+                                                        "✓ File reloaded after editing".to_string(),
+                                                    );
+                                                }
+                                                app.update_content_metrics();
                                             }
-                                            app.update_content_metrics();
-                                        }
-                                        Err(e) => {
-                                            app.status_message =
-                                                Some(format!("✗ Editor failed: {}", e));
+                                            Err(e) => {
+                                                app.status_message =
+                                                    Some(format!("✗ Editor failed: {}", e));
+                                            }
                                         }
                                     }
+                                    ActionResult::Continue => {}
                                 }
-                                ActionResult::Continue => {}
                             }
+                        } else {
+                            // No action found - clear count prefix (invalid key cancels count)
+                            app.clear_count();
                         }
                     }
                 }

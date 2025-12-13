@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2025-12-13
+
+### Added
+
+- **Styled keybinding hints footer** - New context-aware footer bar showing relevant keybindings
+  - Styled key badges with theme colors (`help_key_bg`, `help_key_fg`, `help_desc_fg`, `footer_bg`)
+  - Hints update based on current mode (Normal, Interactive, LinkFollow, DocSearch, etc.)
+  - Element-specific hints in interactive mode (Checkbox, Table, Link, Details, CodeBlock, Image)
+  - Table mode shows cell navigation hints (j/k Row, h/l Col, e Edit, y Copy)
+
+- **Vim-style count prefixes** - Repeat motions with numeric prefixes like vim
+  - `5j` moves down 5 items, `10k` moves up 10 items
+  - Works in Normal mode (outline/content navigation) and Interactive mode
+  - Supports: j/k navigation, h/l table columns, content scrolling
+  - `0` without count goes to first item (vim behavior preserved)
+  - Link follow mode still uses `1-9` for direct link jumping
+
+- **Collapse/Expand commands** - New command palette commands for outline management
+  - `:collapse` / `:ca` - Collapse all headings with children
+  - `:expand` / `:ea` - Expand all headings
+  - `:collapse N` - Collapse all headings at level N (e.g., `:collapse 2` for h2)
+  - `:expand N` - Expand all headings at level N
+  - Status messages show count of affected headings
+
+- **Inline HTML tag rendering** - Parse HTML tags in details block summaries
+  - `<strong>`, `<b>` render as bold
+  - `<em>`, `<i>` render as italic
+  - `<code>` renders as inline code
+  - No longer shows literal `<strong>` tags in rendered view
+
+- **Nested interactive elements in details blocks** - Select elements inside expanded details
+  - Tables, links, code blocks, images inside details are now selectable
+  - Hierarchical status display: `▸Navigation > Table: 5×3`
+  - Expansion state persists after exiting interactive mode
+
+### Changed
+
+- **Status bar shows context-aware position** - Position info based on focused pane
+  - Outline focused: `[Outline] 3/15 (20%)` - heading position
+  - Content focused: `[Content] Line 42 (35%)` - scroll position
+  - Cleaner status bar without inline keybinding hints (moved to footer)
+
+- **Esc key behavior in normal mode** - Shows helpful hint instead of doing nothing
+  - Displays: "Press q to quit • : for commands • ? for help"
+  - Guides new users on how to exit or access features
+
+### Fixed
+
+- **Table navigation in interactive mode** - j/k now moves cells when in table mode
+  - Previously j/k moved between elements instead of table rows
+  - Esc now exits table mode before exiting interactive mode
+
+- **Table row bounds** - Can now navigate to last row in tables
+  - Fixed off-by-one error in `table_move_down()`
+
+### Technical
+
+- **Theme footer colors** (`src/tui/theme.rs`)
+  - Added `help_key_bg`, `help_key_fg`, `help_desc_fg`, `footer_bg` to all 16 theme variants
+  - Added `help_key_style()`, `help_desc_style()`, `footer_style()` helper methods
+  - Updated `with_custom_colors()` and `with_color_mode_custom()` for footer fields
+
+- **Config footer colors** (`src/config.rs`)
+  - Added footer color fields to `CustomThemeConfig` for user customization
+
+- **Layout footer section** (`src/tui/ui/layout.rs`)
+  - Added `Section::Footer` to layout system
+
+- **Count prefix system** (`src/tui/app.rs`, `src/tui/mod.rs`)
+  - Added `count_prefix: Option<usize>` to App state
+  - `accumulate_count_digit()`, `take_count()`, `clear_count()`, `has_count()` methods
+  - Event loop accumulates digits before motion commands
+
+- **Collapse/expand methods** (`src/tui/app.rs`)
+  - `collapse_all()`, `expand_all()`, `collapse_level(n)`, `expand_level(n)`
+  - Added `CollapseAll`, `ExpandAll`, `CollapseLevel`, `ExpandLevel` to `CommandAction`
+
+- **HTML parsing utility** (`src/parser/utils.rs`)
+  - Added `parse_inline_html()` function for HTML tag to InlineElement conversion
+
 ## [0.5.1] - 2025-12-12
 
 ### Fixed

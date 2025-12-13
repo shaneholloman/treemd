@@ -56,6 +56,12 @@ pub enum CommandAction {
     ToggleRawSource,
     JumpToTop,
     JumpToBottom,
+    CollapseAll,
+    ExpandAll,
+    /// Collapse headings at a specific level (parsed from command argument)
+    CollapseLevel,
+    /// Expand headings at a specific level (parsed from command argument)
+    ExpandLevel,
     Quit,
 }
 
@@ -192,6 +198,30 @@ pub const PALETTE_COMMANDS: &[PaletteCommand] = &[
         CommandAction::JumpToBottom,
     ),
     PaletteCommand::new(
+        "Collapse all",
+        &["collapse", "ca"],
+        "Collapse all headings (or :collapse N for level N)",
+        CommandAction::CollapseAll,
+    ),
+    PaletteCommand::new(
+        "Expand all",
+        &["expand", "ea"],
+        "Expand all headings (or :expand N for level N)",
+        CommandAction::ExpandAll,
+    ),
+    PaletteCommand::new(
+        "Collapse level",
+        &["collapse 1", "collapse 2", "collapse 3", "collapse 4", "collapse 5"],
+        "Collapse headings at specific level",
+        CommandAction::CollapseLevel,
+    ),
+    PaletteCommand::new(
+        "Expand level",
+        &["expand 1", "expand 2", "expand 3", "expand 4", "expand 5"],
+        "Expand headings at specific level",
+        CommandAction::ExpandLevel,
+    ),
+    PaletteCommand::new(
         "Quit",
         &["q", "quit", "exit"],
         "Exit treemd",
@@ -244,6 +274,8 @@ pub struct App {
 
     // Link following state
     pub mode: AppMode,
+    /// Vim-style count prefix for motion commands (e.g., 5j moves down 5)
+    pub count_prefix: Option<usize>,
     pub current_file_path: PathBuf, // Path to current file for resolving relative links
     pub file_path_changed: bool,    // Flag to signal file watcher needs update
     pub suppress_file_watch: bool,  // Skip next file watch check (after internal save)
@@ -400,6 +432,7 @@ impl App {
 
             // Link following state
             mode: AppMode::Normal,
+            count_prefix: None,
             current_file_path: file_path,
             file_path_changed: false,
             suppress_file_watch: false,
@@ -544,11 +577,28 @@ impl App {
             }
 
             // === Navigation ===
-            Next => self.next(),
-            Previous => self.previous(),
-            First => self.first(),
-            Last => self.last(),
+            Next => {
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.next();
+                }
+            }
+            Previous => {
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.previous();
+                }
+            }
+            First => {
+                self.clear_count();
+                self.first();
+            }
+            Last => {
+                self.clear_count();
+                self.last();
+            }
             PageDown => {
+                self.clear_count();
                 if self.show_help {
                     self.scroll_help_page_down();
                 } else {
@@ -556,13 +606,17 @@ impl App {
                 }
             }
             PageUp => {
+                self.clear_count();
                 if self.show_help {
                     self.scroll_help_page_up();
                 } else {
                     self.scroll_page_up();
                 }
             }
-            JumpToParent => self.jump_to_parent(),
+            JumpToParent => {
+                self.clear_count();
+                self.jump_to_parent();
+            }
 
             // === Outline ===
             Expand => self.expand(),
@@ -601,51 +655,78 @@ impl App {
 
             // === Interactive Mode ===
             InteractiveNext => {
+                let count = self.take_count();
                 if self.interactive_state.is_in_table_mode() {
                     // In table mode, move down within table
                     let (rows, cols) = self.get_table_dimensions();
-                    self.interactive_state.table_move_down(rows);
+                    for _ in 0..count {
+                        self.interactive_state.table_move_down(rows);
+                    }
                     self.status_message =
                         Some(self.interactive_state.table_status_text(rows + 1, cols));
                 } else {
                     // Normal interactive mode, move to next element
-                    self.interactive_state.next();
+                    for _ in 0..count {
+                        self.interactive_state.next();
+                    }
                     self.scroll_to_interactive_element(20);
                     self.status_message = Some(self.interactive_state.status_text());
                 }
             }
             InteractivePrevious => {
+                let count = self.take_count();
                 if self.interactive_state.is_in_table_mode() {
                     // In table mode, move up within table
                     let (rows, cols) = self.get_table_dimensions();
-                    self.interactive_state.table_move_up();
+                    for _ in 0..count {
+                        self.interactive_state.table_move_up();
+                    }
                     self.status_message =
                         Some(self.interactive_state.table_status_text(rows + 1, cols));
                 } else {
                     // Normal interactive mode, move to previous element
-                    self.interactive_state.previous();
+                    for _ in 0..count {
+                        self.interactive_state.previous();
+                    }
                     self.scroll_to_interactive_element(20);
                     self.status_message = Some(self.interactive_state.status_text());
                 }
             }
             InteractiveActivate => {
+                self.clear_count();
                 if let Err(e) = self.activate_interactive_element() {
                     self.status_message = Some(format!("✗ Error: {}", e));
                 }
                 self.update_content_metrics();
             }
             InteractiveNextLink => {
-                self.interactive_state.next();
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.interactive_state.next();
+                }
                 self.scroll_to_interactive_element(20);
                 self.status_message = Some(self.interactive_state.status_text());
             }
             InteractivePreviousLink => {
-                self.interactive_state.previous();
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.interactive_state.previous();
+                }
                 self.scroll_to_interactive_element(20);
                 self.status_message = Some(self.interactive_state.status_text());
             }
-            InteractiveLeft => self.table_navigate_left(),
-            InteractiveRight => self.table_navigate_right(),
+            InteractiveLeft => {
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.table_navigate_left();
+                }
+            }
+            InteractiveRight => {
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.table_navigate_right();
+                }
+            }
 
             // === View ===
             ToggleRawSource => self.toggle_raw_source(),
@@ -700,12 +781,28 @@ impl App {
             JumpToLink9 => self.jump_to_link(8),
 
             // === Scroll (Content pane) ===
-            ScrollDown => self.scroll_content_down(),
-            ScrollUp => self.scroll_content_up(),
+            ScrollDown => {
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.scroll_content_down();
+                }
+            }
+            ScrollUp => {
+                let count = self.take_count();
+                for _ in 0..count {
+                    self.scroll_content_up();
+                }
+            }
 
             // === Help Navigation ===
-            HelpScrollDown => self.scroll_help_down(),
-            HelpScrollUp => self.scroll_help_up(),
+            HelpScrollDown => {
+                self.clear_count();
+                self.scroll_help_down();
+            }
+            HelpScrollUp => {
+                self.clear_count();
+                self.scroll_help_up();
+            }
 
             // === Theme Picker Navigation ===
             ThemePickerNext => self.theme_picker_next(),
@@ -773,7 +870,18 @@ impl App {
                 self.mode = AppMode::Interactive;
                 self.status_message = Some("Editing cancelled".to_string());
             }
-            _ => {}
+            AppMode::ThemePicker => {
+                // Close theme picker (restores original theme)
+                self.toggle_theme_picker();
+            }
+            AppMode::Help => {
+                // Close help
+                self.show_help = false;
+            }
+            AppMode::Normal | AppMode::ConfirmFileCreate | AppMode::ConfirmSaveWidth => {
+                // In normal mode, show hint for quitting
+                self.set_status_message("Press q to quit • : for commands • ? for help");
+            }
         }
     }
 
@@ -946,6 +1054,35 @@ impl App {
                 self.status_message_time = None;
             }
         }
+    }
+
+    /// Accumulate a digit into the vim-style count prefix
+    /// Returns true if the digit was handled as a count prefix
+    pub fn accumulate_count_digit(&mut self, digit: char) -> bool {
+        if let Some(d) = digit.to_digit(10) {
+            let current = self.count_prefix.unwrap_or(0);
+            // Limit to reasonable count (max 9999)
+            let new_count = current.saturating_mul(10).saturating_add(d as usize).min(9999);
+            self.count_prefix = Some(new_count);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get and consume the count prefix, returning at least 1
+    pub fn take_count(&mut self) -> usize {
+        self.count_prefix.take().unwrap_or(1)
+    }
+
+    /// Clear the count prefix without consuming it
+    pub fn clear_count(&mut self) {
+        self.count_prefix = None;
+    }
+
+    /// Check if there's an active count prefix
+    pub fn has_count(&self) -> bool {
+        self.count_prefix.is_some()
     }
 
     /// Check if the document has non-whitespace content before the first heading
@@ -1790,6 +1927,158 @@ impl App {
         }
     }
 
+    /// Collapse all headings that have children
+    pub fn collapse_all(&mut self) {
+        // Collect all heading texts that have children
+        let headings_to_collapse: Vec<String> = self
+            .tree
+            .iter()
+            .flat_map(|node| Self::collect_collapsible_headings(node))
+            .collect();
+
+        for text in headings_to_collapse {
+            self.collapsed_headings.insert(text);
+        }
+
+        // Rebuild outline and preserve selection
+        let selected_text = self.selected_heading_text().map(|s| s.to_string());
+        self.rebuild_outline_items();
+
+        // Try to restore selection, or select first item
+        if let Some(text) = selected_text {
+            if !self.select_by_text(&text) {
+                // Selection collapsed away, select first item
+                if !self.outline_items.is_empty() {
+                    self.outline_state.select(Some(0));
+                    self.outline_scroll_state =
+                        ScrollbarState::new(self.outline_items.len()).position(0);
+                }
+            }
+        }
+
+        let count = self.collapsed_headings.len();
+        self.set_status_message(&format!("Collapsed {} headings", count));
+    }
+
+    /// Recursively collect all heading texts that have children
+    fn collect_collapsible_headings(node: &HeadingNode) -> Vec<String> {
+        let mut result = Vec::new();
+        if !node.children.is_empty() {
+            result.push(node.heading.text.clone());
+            for child in &node.children {
+                result.extend(Self::collect_collapsible_headings(child));
+            }
+        }
+        result
+    }
+
+    /// Expand all headings
+    pub fn expand_all(&mut self) {
+        let count = self.collapsed_headings.len();
+        self.collapsed_headings.clear();
+
+        // Rebuild outline and preserve selection
+        let selected_text = self.selected_heading_text().map(|s| s.to_string());
+        self.rebuild_outline_items();
+
+        if let Some(text) = selected_text {
+            self.select_by_text(&text);
+        }
+
+        self.set_status_message(&format!("Expanded {} headings", count));
+    }
+
+    /// Collapse all headings at a specific level (1-6)
+    pub fn collapse_level(&mut self, level: usize) {
+        // Collect all headings at the target level that have children
+        let headings_to_collapse: Vec<String> = self
+            .tree
+            .iter()
+            .flat_map(|node| Self::collect_headings_at_level_with_children(node, level))
+            .collect();
+
+        let count = headings_to_collapse.len();
+        for text in headings_to_collapse {
+            self.collapsed_headings.insert(text);
+        }
+
+        // Rebuild outline and preserve selection
+        let selected_text = self.selected_heading_text().map(|s| s.to_string());
+        self.rebuild_outline_items();
+
+        if let Some(text) = selected_text {
+            if !self.select_by_text(&text) {
+                // Selection collapsed away, select first item
+                if !self.outline_items.is_empty() {
+                    self.outline_state.select(Some(0));
+                    self.outline_scroll_state =
+                        ScrollbarState::new(self.outline_items.len()).position(0);
+                }
+            }
+        }
+
+        self.set_status_message(&format!("Collapsed {} h{} headings", count, level));
+    }
+
+    /// Recursively collect headings at a specific level that have children
+    fn collect_headings_at_level_with_children(node: &HeadingNode, target_level: usize) -> Vec<String> {
+        let mut result = Vec::new();
+
+        if node.heading.level == target_level && !node.children.is_empty() {
+            result.push(node.heading.text.clone());
+        }
+
+        // Always recurse to find nested headings at the target level
+        for child in &node.children {
+            result.extend(Self::collect_headings_at_level_with_children(child, target_level));
+        }
+
+        result
+    }
+
+    /// Expand all headings at a specific level (1-6)
+    pub fn expand_level(&mut self, level: usize) {
+        let mut count = 0;
+
+        // Find all collapsed headings at the specified level and expand them
+        let headings_at_level: Vec<String> = self
+            .tree
+            .iter()
+            .flat_map(|node| self.collect_headings_at_level(node, level))
+            .collect();
+
+        for heading_text in headings_at_level {
+            if self.collapsed_headings.remove(&heading_text) {
+                count += 1;
+            }
+        }
+
+        // Rebuild outline and preserve selection
+        let selected_text = self.selected_heading_text().map(|s| s.to_string());
+        self.rebuild_outline_items();
+
+        if let Some(text) = selected_text {
+            self.select_by_text(&text);
+        }
+
+        self.set_status_message(&format!("Expanded {} h{} headings", count, level));
+    }
+
+    /// Collect heading texts at a specific level
+    fn collect_headings_at_level(&self, node: &HeadingNode, target_level: usize) -> Vec<String> {
+        let mut result = Vec::new();
+
+        if node.heading.level == target_level {
+            result.push(node.heading.text.clone());
+        }
+
+        for child in &node.children {
+            result.extend(self.collect_headings_at_level(child, target_level));
+        }
+
+        result
+    }
+
     pub fn toggle_focus(&mut self) {
         // If in locked-in outline search state, Tab cycles to next filtered item
         if self.show_search && !self.outline_search_active && !self.outline_items.is_empty() {
@@ -1987,9 +2276,10 @@ impl App {
     pub fn execute_selected_command(&mut self) -> bool {
         let should_quit = if let Some(&cmd_idx) = self.command_filtered.get(self.command_selected) {
             let action = PALETTE_COMMANDS[cmd_idx].action;
+            let query = self.command_query.clone(); // Capture query for argument parsing
             self.mode = AppMode::Normal;
             self.command_query.clear();
-            self.execute_command_action(action)
+            self.execute_command_action(action, &query)
         } else {
             self.mode = AppMode::Normal;
             false
@@ -1998,7 +2288,7 @@ impl App {
     }
 
     /// Execute a command action, returns true if should quit
-    fn execute_command_action(&mut self, action: CommandAction) -> bool {
+    fn execute_command_action(&mut self, action: CommandAction, query: &str) -> bool {
         match action {
             CommandAction::SaveWidth => {
                 match self.config.set_outline_width(self.outline_width) {
@@ -2037,8 +2327,44 @@ impl App {
                 self.last();
                 false
             }
+            CommandAction::CollapseAll => {
+                self.collapse_all();
+                false
+            }
+            CommandAction::ExpandAll => {
+                self.expand_all();
+                false
+            }
+            CommandAction::CollapseLevel => {
+                // Parse level from query (e.g., "collapse 2" -> 2)
+                if let Some(level) = Self::parse_level_from_query(query) {
+                    self.collapse_level(level);
+                } else {
+                    self.collapse_all();
+                }
+                false
+            }
+            CommandAction::ExpandLevel => {
+                // Parse level from query (e.g., "expand 2" -> 2)
+                if let Some(level) = Self::parse_level_from_query(query) {
+                    self.expand_level(level);
+                } else {
+                    self.expand_all();
+                }
+                false
+            }
             CommandAction::Quit => true,
         }
+    }
+
+    /// Parse a level number from a command query like "collapse 2" or "expand 3"
+    fn parse_level_from_query(query: &str) -> Option<usize> {
+        // Find the last word and try to parse it as a number
+        query
+            .split_whitespace()
+            .last()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n >= 1 && n <= 6)
     }
 
     /// Get selected command for display

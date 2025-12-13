@@ -123,7 +123,7 @@ pub const HELP_LINES: &[HelpLine] = &[
     keybinding("[ ]", "Decrease/increase outline width (20%, 30%, 40%)"),
     keybinding("S", "Save outline width to config (with confirmation)"),
     keybinding(":", "Open command palette (fuzzy search commands)"),
-    keybinding("1-9", "Jump to heading 1-9"),
+    keybinding("[N]j/k", "Move N items (vim count prefix, e.g., 5j)"),
     keybinding("m", "Set bookmark (shows ⚑ indicator)"),
     keybinding("'", "Jump to bookmarked position"),
     blank(),
