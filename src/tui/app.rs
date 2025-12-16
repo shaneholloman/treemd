@@ -293,6 +293,7 @@ pub struct App {
     pub content_scroll: u16,
     pub content_scroll_state: ScrollbarState,
     pub content_height: u16,
+    pub content_viewport_height: u16, // Actual viewport height for scroll calculations
     pub show_help: bool,
     pub help_scroll: u16,
     pub show_search: bool,
@@ -462,6 +463,7 @@ impl App {
             content_scroll: 0,
             content_scroll_state: ScrollbarState::new(content_lines),
             content_height: content_lines as u16,
+            content_viewport_height: 20, // Default, will be updated by UI on first render
             show_help: false,
             help_scroll: 0,
             show_search: false,
@@ -546,6 +548,11 @@ impl App {
             // Pending navigation (for confirm save dialog)
             pending_navigation: None,
         }
+    }
+
+    /// Update the content viewport height (called by UI when terminal size is known)
+    pub fn set_viewport_height(&mut self, height: u16) {
+        self.content_viewport_height = height.max(1); // Ensure at least 1 to avoid divide-by-zero
     }
 
     /// Get the current keybinding mode based on app state
@@ -733,7 +740,7 @@ impl App {
                     for _ in 0..count {
                         self.interactive_state.next();
                     }
-                    self.scroll_to_interactive_element(20);
+                    self.scroll_to_interactive_element(self.content_viewport_height);
                     self.status_message = Some(self.interactive_state.status_text());
                 }
             }
@@ -752,7 +759,7 @@ impl App {
                     for _ in 0..count {
                         self.interactive_state.previous();
                     }
-                    self.scroll_to_interactive_element(20);
+                    self.scroll_to_interactive_element(self.content_viewport_height);
                     self.status_message = Some(self.interactive_state.status_text());
                 }
             }
@@ -773,7 +780,7 @@ impl App {
                 for _ in 0..count {
                     self.interactive_state.next();
                 }
-                self.scroll_to_interactive_element(20);
+                self.scroll_to_interactive_element(self.content_viewport_height);
                 self.status_message = Some(self.interactive_state.status_text());
             }
             InteractivePreviousLink => {
@@ -781,7 +788,7 @@ impl App {
                 for _ in 0..count {
                     self.interactive_state.previous();
                 }
-                self.scroll_to_interactive_element(20);
+                self.scroll_to_interactive_element(self.content_viewport_height);
                 self.status_message = Some(self.interactive_state.status_text());
             }
             InteractiveLeft => {
@@ -917,6 +924,7 @@ impl App {
             // === Command Palette ===
             CommandPaletteNext => self.command_palette_next(),
             CommandPalettePrev => self.command_palette_prev(),
+            CommandPaletteAutocomplete => self.command_palette_autocomplete(),
 
             // === Doc Search Navigation ===
             NextMatch => self.next_doc_match(),
@@ -1768,7 +1776,7 @@ impl App {
                 let match_line = m.line as u16;
 
                 // Scroll to bring match line into view (center it if possible)
-                let half_viewport = 10u16; // Approximate half viewport
+                let half_viewport = self.content_viewport_height / 2;
                 self.content_scroll = match_line.saturating_sub(half_viewport);
                 self.content_scroll = self
                     .content_scroll
@@ -1998,21 +2006,23 @@ impl App {
             let start = start_line as u16;
             let end = end_line as u16;
             let scroll = self.content_scroll;
-            let viewport_end = scroll + viewport_height;
+            let viewport_end = scroll.saturating_add(viewport_height);
 
-            // Element is above viewport - scroll up to show it
-            if start < scroll {
-                self.content_scroll = start;
+            // Add margin for smoother scrolling - trigger before element goes completely off-screen
+            let scroll_margin = 2u16.min(viewport_height / 4);
+
+            // Element is above viewport (or too close to top margin) - scroll up
+            if start < scroll.saturating_add(scroll_margin) {
+                self.content_scroll = start.saturating_sub(scroll_margin);
             }
-            // Element is below viewport - scroll down to show it
-            else if end > viewport_end {
-                // Try to position element at top of viewport
+            // Element end is below viewport (or within bottom margin) - scroll down
+            else if end.saturating_add(scroll_margin) > viewport_end {
+                // Position so element's end is near bottom of viewport with margin
+                let new_scroll = end
+                    .saturating_add(scroll_margin)
+                    .saturating_sub(viewport_height);
                 self.content_scroll =
-                    start.min(self.content_height.saturating_sub(viewport_height));
-            }
-            // Element partially visible at bottom - ensure fully visible
-            else if start >= scroll && end > viewport_end {
-                self.content_scroll = end.saturating_sub(viewport_height);
+                    new_scroll.min(self.content_height.saturating_sub(viewport_height));
             }
 
             // Update scrollbar state
@@ -2472,6 +2482,19 @@ impl App {
         }
     }
 
+    /// Autocomplete command palette with selected command's alias
+    pub fn command_palette_autocomplete(&mut self) {
+        if let Some(&cmd_idx) = self.command_filtered.get(self.command_selected) {
+            let cmd = &PALETTE_COMMANDS[cmd_idx];
+            // Use the first alias (typically the shortest canonical form)
+            if let Some(&alias) = cmd.aliases.first() {
+                self.command_query = alias.to_string();
+                // Re-filter with the new query (will likely still match the same command)
+                self.filter_commands();
+            }
+        }
+    }
+
     /// Close command palette without executing
     pub fn close_command_palette(&mut self) {
         self.mode = AppMode::Normal;
@@ -2729,6 +2752,11 @@ impl App {
         let _ = self.config.set_theme(self.current_theme);
     }
 
+    /// Get the editor configuration for external file editing
+    pub fn editor_config(&self) -> opensesame::EditorConfig {
+        self.config.editor.clone()
+    }
+
     pub fn copy_content(&mut self) {
         // Copy the currently selected section's content
         if let Some(heading_text) = self.selected_heading_text() {
@@ -2779,12 +2807,9 @@ impl App {
         }
     }
 
-    /// Convert heading text to anchor format (lowercase, replace spaces with dashes)
+    /// Convert heading text to anchor format using the parser's slugify for consistency
     fn heading_to_anchor(heading: &str) -> String {
-        heading
-            .to_lowercase()
-            .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
-            .replace(' ', "-")
+        crate::parser::content::slugify(heading)
     }
 
     /// Enter link follow mode - extract links from current section and highlight them
@@ -3498,7 +3523,7 @@ impl App {
         self.mode = AppMode::Interactive;
 
         // Only scroll if the selected element is not fully visible
-        self.scroll_to_interactive_element(20);
+        self.scroll_to_interactive_element(self.content_viewport_height);
 
         // Set status message
         if self.interactive_state.elements.is_empty() {
