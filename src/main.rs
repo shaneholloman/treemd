@@ -80,22 +80,60 @@ fn main() -> Result<()> {
     //
     // This is the standard pattern used by: less, fzf, bat, etc.
 
-    // Determine input source (file, stdin, or error)
-    let input_source = match treemd::input::determine_input_source(args.file.as_deref()) {
-        Ok(source) => source,
-        Err(treemd::input::InputError::NoTty) => {
-            eprintln!("Error: markdown file argument is required");
-            eprintln!("\nUsage: treemd [OPTIONS] <FILE>");
-            eprintln!("       treemd [OPTIONS] -");
-            eprintln!("       tree | treemd [OPTIONS]\n");
-            eprintln!("Use '-' to explicitly read from stdin, or pipe input with CLI flags.");
-            eprintln!("\nFor shell completion setup, use:");
-            eprintln!("  treemd --setup-completions");
-            std::process::exit(1);
+    // Determine input source - check for file picker case first
+    let (input_source, needs_file_picker) = match args.file.as_deref() {
+        None => {
+            // No file provided - check for .md files in cwd
+            use std::fs;
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let md_files: Vec<_> = fs::read_dir(&cwd)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    let path = entry.path();
+                    path.is_file()
+                        && path.extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext == "md" || ext == "markdown")
+                            .unwrap_or(false)
+                })
+                .collect();
+
+            if md_files.is_empty() {
+                eprintln!("No markdown files found in current directory.");
+                eprintln!("\nUsage: treemd [OPTIONS] <FILE>");
+                eprintln!("       treemd [OPTIONS] -");
+                eprintln!("       tree | treemd [OPTIONS]\n");
+                eprintln!("Tip: Navigate to a directory with .md files, or specify a file path.");
+                eprintln!("\nFor shell completion setup, use:");
+                eprintln!("  treemd --setup-completions");
+                std::process::exit(0);
+            }
+
+            // Create dummy document to show file picker
+            (treemd::input::InputSource::Stdin("# Select a file\n\nPress Enter to select a markdown file.".to_string()), true)
         }
-        Err(e) => {
-            eprintln!("Error reading input: {}", e);
-            process::exit(1);
+        Some(file_path) => {
+            // File path was provided - use existing logic
+            match treemd::input::determine_input_source(Some(file_path)) {
+                Ok(source) => (source, false),
+                Err(treemd::input::InputError::NoTty) => {
+                    eprintln!("Error: markdown file argument is required");
+                    eprintln!("\nUsage: treemd [OPTIONS] <FILE>");
+                    eprintln!("       treemd [OPTIONS] -");
+                    eprintln!("       tree | treemd [OPTIONS]\n");
+                    eprintln!("Use '-' to explicitly read from stdin, or pipe input with CLI flags.");
+                    eprintln!("\nFor shell completion setup, use:");
+                    eprintln!("  treemd --setup-completions");
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Error reading input: {}", e);
+                    process::exit(1);
+                }
+            }
         }
     };
 
@@ -211,7 +249,10 @@ fn main() -> Result<()> {
             ("stdin".to_string(), std::path::PathBuf::from("<stdin>"))
         };
 
-        let app = treemd::App::new(doc, filename, file_path, config, color_mode);
+        let mut app = treemd::App::new(doc, filename, file_path, config, color_mode);
+        if needs_file_picker {
+            app.startup_needs_file_picker = true;
+        }
         let result = treemd::tui::run(&mut terminal, app);
 
         // Cleanup terminal state
