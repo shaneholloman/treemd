@@ -20,7 +20,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use opensesame::Editor;
+use opensesame::{Editor, EditorConfig};
 use ratatui::DefaultTerminal;
 use std::io::stdout;
 use std::path::Path;
@@ -29,16 +29,25 @@ use std::time::Duration;
 /// Suspend the TUI, run an external editor, then restore the TUI.
 ///
 /// If line is provided and the editor supports it, the file will be opened at that line.
-fn run_editor(terminal: &mut DefaultTerminal, file: &Path, line: Option<u32>) -> Result<()> {
+/// Uses the provided EditorConfig for editor selection and arguments.
+fn run_editor(
+    terminal: &mut DefaultTerminal,
+    file: &Path,
+    line: Option<u32>,
+    editor_config: &EditorConfig,
+) -> Result<()> {
     // Leave alternate screen and disable raw mode to give editor full terminal control
     stdout().execute(LeaveAlternateScreen)?;
     disable_raw_mode()?;
 
-    // Open file in editor (blocks until editor closes)
-    let result = match line {
-        Some(l) => Editor::open_at(file, l),
-        None => Editor::open(file),
-    };
+    // Build editor command with config
+    let mut builder = Editor::builder().file(file).with_config(editor_config.clone());
+
+    if let Some(l) = line {
+        builder = builder.line(l);
+    }
+
+    let result = builder.open();
 
     // Restore terminal state
     stdout().execute(EnterAlternateScreen)?;
@@ -87,7 +96,8 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("file");
-            match run_editor(terminal, &file_path, None) {
+            let editor_config = app.editor_config();
+            match run_editor(terminal, &file_path, None, &editor_config) {
                 Ok(_) => {
                     app.status_message = Some(format!("✓ Opened {} in editor", filename));
                 }
@@ -188,7 +198,8 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
                                 match app.execute_action(action) {
                                     ActionResult::Quit => return Ok(()),
                                     ActionResult::RunEditor(path, line) => {
-                                        match run_editor(terminal, &path, line) {
+                                        let editor_config = app.editor_config();
+                                        match run_editor(terminal, &path, line, &editor_config) {
                                             Ok(_) => {
                                                 if let Err(e) = app.reload_current_file() {
                                                     app.status_message =

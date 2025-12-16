@@ -3,26 +3,43 @@
 //! Pure functions for layout calculations, text parsing, and formatting.
 
 use crate::parser::output::Alignment;
-use ratatui::layout::{Constraint, Flex, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-/// Calculate a centered rectangular area within a parent area.
+/// Calculate a popup area with minimum size constraints.
 ///
-/// Returns a `Rect` that is centered both horizontally and vertically,
-/// sized as a percentage of the parent area.
+/// Returns a `Rect` that is centered within the parent area, sized as a
+/// percentage but respecting minimum dimensions. If the parent is smaller
+/// than the minimum, the popup will fill the available space.
 ///
 /// # Arguments
 /// * `area` - The parent area to center within
 /// * `percent_x` - Width as a percentage of parent (0-100)
 /// * `percent_y` - Height as a percentage of parent (0-100)
-pub fn centered_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)]).flex(Flex::Center);
-    let horizontal = Layout::horizontal([Constraint::Percentage(percent_x)]).flex(Flex::Center);
-    let [area] = vertical.areas(area);
-    let [area] = horizontal.areas(area);
-    area
+/// * `min_width` - Minimum width in columns (will not exceed parent width)
+/// * `min_height` - Minimum height in rows (will not exceed parent height)
+pub fn popup_area(
+    area: Rect,
+    percent_x: u16,
+    percent_y: u16,
+    min_width: u16,
+    min_height: u16,
+) -> Rect {
+    // Calculate percentage-based dimensions
+    let pct_width = area.width * percent_x / 100;
+    let pct_height = area.height * percent_y / 100;
+
+    // Apply minimum constraints, but don't exceed parent
+    let width = pct_width.max(min_width).min(area.width);
+    let height = pct_height.max(min_height).min(area.height);
+
+    // Center the popup
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+
+    Rect::new(x, y, width, height)
 }
 
 /// Detect checkbox markers in text for task list items.
@@ -221,37 +238,6 @@ pub fn build_highlighted_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    mod centered_area_tests {
-        use super::*;
-
-        #[test]
-        fn test_centered_full_size() {
-            let parent = Rect::new(0, 0, 100, 50);
-            let result = centered_area(parent, 100, 100);
-            assert_eq!(result.width, 100);
-            assert_eq!(result.height, 50);
-        }
-
-        #[test]
-        fn test_centered_half_size() {
-            let parent = Rect::new(0, 0, 100, 50);
-            let result = centered_area(parent, 50, 50);
-            // Should be centered: x offset should be ~25, y offset should be ~12
-            assert_eq!(result.width, 50);
-            assert_eq!(result.height, 25);
-            assert!(result.x >= 24 && result.x <= 26); // Allow for rounding
-            assert!(result.y >= 11 && result.y <= 13);
-        }
-
-        #[test]
-        fn test_centered_zero_size() {
-            let parent = Rect::new(0, 0, 100, 50);
-            let result = centered_area(parent, 0, 0);
-            assert_eq!(result.width, 0);
-            assert_eq!(result.height, 0);
-        }
-    }
 
     mod detect_checkbox_tests {
         use super::*;

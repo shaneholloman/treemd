@@ -408,9 +408,16 @@ impl InteractiveState {
                             });
                         }
 
-                        // Also extract links from list items (e.g., TOC links)
+                        // Extract links from list items (e.g., TOC links)
+                        // The parser provides line_offset for links inside list items
                         for (inline_idx, inline_elem) in item.inline.iter().enumerate() {
-                            if let InlineElement::Link { text, url, .. } = inline_elem {
+                            if let InlineElement::Link {
+                                text,
+                                url,
+                                line_offset,
+                                ..
+                            } = inline_elem
+                            {
                                 // Use a composite sub_idx to differentiate from checkboxes
                                 let id = ElementId {
                                     block_idx,
@@ -418,6 +425,10 @@ impl InteractiveState {
                                         item_idx * LINK_ITEM_MULTIPLIER + inline_idx + LINK_OFFSET,
                                     ),
                                 };
+
+                                // Use parser-provided line_offset (0 for first line, 1 for second, etc.)
+                                let offset = line_offset.unwrap_or(0);
+                                let link_line = item_start_line + offset;
 
                                 // Parse link target
                                 let target = if let Some(wikilink_target) =
@@ -453,15 +464,16 @@ impl InteractiveState {
                                     id,
                                     element_type: ElementType::Link {
                                         link: Link::new(text.clone(), target, 0),
-                                        line_idx: item_start_line,
+                                        line_idx: link_line,
                                     },
-                                    line_range: (item_start_line, item_start_line + 1),
+                                    line_range: (link_line, link_line + 1),
                                 });
                             }
                         }
 
-                        // Account for main item line
-                        current_line += 1;
+                        // Account for all lines in this item (main + nested)
+                        let item_line_count = item.content.lines().count().max(1);
+                        current_line += item_line_count;
 
                         // Process nested blocks within list items (code blocks, tables, etc.)
                         for (nested_idx, nested_block) in item.blocks.iter().enumerate() {
@@ -1186,6 +1198,36 @@ fn main() {}
             state.elements.len() >= 5,
             "Should find at least 5 interactive elements, found {}",
             state.elements.len()
+        );
+    }
+
+    #[test]
+    fn test_nested_list_item_links() {
+        // Test that links from nested list items are found in interactive mode
+        let markdown = r#"# Table of Contents
+
+- [Features](#features)
+  - [Interactive TUI](#interactive-tui)
+  - [CLI Mode](#cli-mode)
+- [Installation](#installation)
+"#;
+
+        let blocks = parse_content(markdown, 0);
+        let mut state = InteractiveState::new();
+        state.index_elements(&blocks);
+
+        // Count link elements
+        let link_count = state
+            .elements
+            .iter()
+            .filter(|e| matches!(e.element_type, ElementType::Link { .. }))
+            .count();
+
+        // Should find all 4 links: Features, Interactive TUI, CLI Mode, Installation
+        assert_eq!(
+            link_count, 4,
+            "Should find 4 links (including nested), found {}",
+            link_count
         );
     }
 }

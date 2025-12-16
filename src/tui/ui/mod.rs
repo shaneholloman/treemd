@@ -52,7 +52,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Create horizontal layout for outline and content (conditional based on outline visibility)
     let content_area = main_layout.require(Section::Content);
-    let content_chunks = if app.show_outline {
+
+    // Update viewport height for scroll calculations (subtract 2 for block borders)
+    app.set_viewport_height(content_area.height.saturating_sub(2));
+
+    // Minimum widths: outline needs at least 20 cols to be usable, content needs at least 40
+    const MIN_OUTLINE_WIDTH: u16 = 20;
+    const MIN_CONTENT_WIDTH: u16 = 40;
+    const MIN_TOTAL_WIDTH: u16 = MIN_OUTLINE_WIDTH + MIN_CONTENT_WIDTH;
+
+    // Decide whether to show outline based on terminal width
+    let effective_show_outline =
+        app.show_outline && content_area.width >= MIN_TOTAL_WIDTH;
+
+    let content_chunks = if effective_show_outline {
         let content_width = 100 - app.outline_width;
         Layout::horizontal([
             Constraint::Percentage(app.outline_width),
@@ -64,8 +77,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Layout::horizontal([Constraint::Percentage(100)]).split(content_area)
     };
 
-    // Render outline (left pane) only if visible
-    if app.show_outline {
+    // Render outline (left pane) only if effectively visible (user toggle AND enough width)
+    if effective_show_outline {
         render_outline(frame, app, content_chunks[0]);
         // Render content (right pane)
         render_content(frame, app, content_chunks[1]);
@@ -895,7 +908,25 @@ fn render_markdown_enhanced(
                         }
                     });
 
-                    let is_any_selected = is_item_selected || selected_link_inline_idx.is_some();
+                    // Determine which line should have the pointer based on selected link's line_offset
+                    let selected_line_offset: Option<usize> =
+                        selected_link_inline_idx.and_then(|inline_idx| {
+                            item.inline.get(inline_idx).and_then(|elem| {
+                                if let InlineElement::Link { line_offset, .. } = elem {
+                                    // Use line_offset if provided, otherwise default to 0
+                                    Some(line_offset.unwrap_or(0))
+                                } else {
+                                    None
+                                }
+                            })
+                        });
+
+                    // For checkboxes, always select line 0; for links, use their line_offset
+                    let pointer_line = if is_item_selected {
+                        Some(0)
+                    } else {
+                        selected_line_offset
+                    };
 
                     // Check if content has nested items (contains newlines with indentation)
                     let has_nested = item.content.contains('\n');
@@ -904,12 +935,15 @@ fn render_markdown_enhanced(
                         // Render multi-line item with nested items
                         let content_lines = item.content.lines();
                         for (line_idx, line) in content_lines.enumerate() {
+                            // Check if this specific line should have the pointer
+                            let show_pointer = pointer_line == Some(line_idx);
+
                             if line_idx == 0 {
                                 // First line: use regular list marker
                                 let mut spans = vec![];
 
-                                // Add selection indicator for checkboxes or links
-                                if is_any_selected {
+                                // Pointer replaces leading spaces, not prepended
+                                if show_pointer {
                                     spans.push(Span::styled(
                                         "→ ",
                                         Style::default()
@@ -917,15 +951,17 @@ fn render_markdown_enhanced(
                                             .bg(theme.selection_indicator_bg)
                                             .add_modifier(Modifier::BOLD),
                                     ));
+                                } else {
+                                    spans.push(Span::raw("  "));
                                 }
 
                                 let prefix = if let Some(checked) = item.checked {
                                     let checkbox = if checked { "☑" } else { "☐" };
-                                    format!("  {} ", checkbox)
+                                    format!("{} ", checkbox)
                                 } else if *ordered {
-                                    format!("  {}. ", idx + 1)
+                                    format!("{}. ", idx + 1)
                                 } else {
-                                    "  • ".to_string()
+                                    "• ".to_string()
                                 };
                                 let formatted = format_inline_markdown(line, theme);
                                 spans.push(Span::styled(
@@ -943,7 +979,26 @@ fn render_markdown_enhanced(
                                     let (is_task, checked, text_after_marker) =
                                         detect_checkbox_in_text(trimmed);
 
-                                    let indent = " ".repeat(indent_count + 2); // Base indent + 2
+                                    let mut spans = vec![];
+
+                                    // Calculate indent: reserve 2 chars for pointer at appropriate depth
+                                    // Base indent (2) + nested indent, with pointer replacing last 2 chars
+                                    let total_indent = indent_count + 2;
+                                    if show_pointer {
+                                        // Indent up to pointer position, then pointer
+                                        let pre_pointer_indent =
+                                            " ".repeat(total_indent.saturating_sub(2));
+                                        spans.push(Span::raw(pre_pointer_indent));
+                                        spans.push(Span::styled(
+                                            "→ ",
+                                            Style::default()
+                                                .fg(theme.selection_indicator_fg)
+                                                .bg(theme.selection_indicator_bg)
+                                                .add_modifier(Modifier::BOLD),
+                                        ));
+                                    } else {
+                                        spans.push(Span::raw(" ".repeat(total_indent)));
+                                    }
 
                                     let marker = if is_task {
                                         // Task list item with checkbox
@@ -955,13 +1010,10 @@ fn render_markdown_enhanced(
 
                                     let formatted =
                                         format_inline_markdown(text_after_marker, theme);
-                                    let mut spans = vec![
-                                        Span::raw(indent),
-                                        Span::styled(
-                                            marker,
-                                            Style::default().fg(theme.list_bullet),
-                                        ),
-                                    ];
+                                    spans.push(Span::styled(
+                                        marker,
+                                        Style::default().fg(theme.list_bullet),
+                                    ));
                                     spans.extend(formatted);
                                     lines.push(Line::from(spans));
                                 } else {
@@ -980,8 +1032,8 @@ fn render_markdown_enhanced(
 
                         let mut spans = vec![];
 
-                        // Add selection indicator for checkboxes or links
-                        if is_any_selected {
+                        // Pointer replaces leading spaces, not prepended
+                        if pointer_line.is_some() {
                             spans.push(Span::styled(
                                 "→ ",
                                 Style::default()
@@ -989,15 +1041,17 @@ fn render_markdown_enhanced(
                                     .bg(theme.selection_indicator_bg)
                                     .add_modifier(Modifier::BOLD),
                             ));
+                        } else {
+                            spans.push(Span::raw("  "));
                         }
 
                         let prefix = if let Some(checked) = item.checked {
                             let checkbox = if checked { "☑" } else { "☐" };
-                            format!("  {} ", checkbox)
+                            format!("{} ", checkbox)
                         } else if *ordered {
-                            format!("  {}. ", idx + 1)
+                            format!("{}. ", idx + 1)
                         } else {
-                            "  • ".to_string()
+                            "• ".to_string()
                         };
 
                         spans.push(Span::styled(prefix, Style::default().fg(theme.list_bullet)));
@@ -1726,8 +1780,46 @@ fn format_inline_markdown<'a>(text: &str, theme: &Theme) -> Vec<Span<'a>> {
     let mut i = 0;
 
     while i < chars.len() {
+        // Check for markdown link [text](url)
+        if chars[i] == '[' {
+            // Look for the closing ] and opening (
+            let mut j = i + 1;
+            let mut link_text = String::new();
+            while j < chars.len() && chars[j] != ']' {
+                link_text.push(chars[j]);
+                j += 1;
+            }
+            // Check if followed by (url)
+            if j + 1 < chars.len() && chars[j] == ']' && chars[j + 1] == '(' {
+                let mut k = j + 2;
+                let mut url = String::new();
+                while k < chars.len() && chars[k] != ')' {
+                    url.push(chars[k]);
+                    k += 1;
+                }
+                if k < chars.len() && chars[k] == ')' {
+                    // Valid link found
+                    if !current.is_empty() {
+                        spans.push(Span::raw(current.clone()));
+                        current.clear();
+                    }
+                    // Render link text with link styling
+                    spans.push(Span::styled(
+                        link_text,
+                        Style::default()
+                            .fg(theme.link_fg)
+                            .add_modifier(Modifier::UNDERLINED),
+                    ));
+                    i = k + 1; // Move past the closing )
+                    continue;
+                }
+            }
+            // Not a valid link, treat [ as regular character
+            current.push(chars[i]);
+            i += 1;
+        }
         // Check for inline code `code`
-        if chars[i] == '`' {
+        else if chars[i] == '`' {
             if !current.is_empty() {
                 spans.push(Span::raw(current.clone()));
                 current.clear();

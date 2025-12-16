@@ -14,11 +14,12 @@ use ratatui::widgets::{
     Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use super::util::centered_area;
+use super::util::popup_area;
 
 /// Render the help popup with keyboard shortcuts
 pub fn render_help_popup(frame: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_area(area, 70, 80);
+    // Min 40 cols for readability, min 10 rows for usable scroll area
+    let popup_area = popup_area(area, 70, 80, 40, 10);
     let theme = &app.theme;
 
     // Clear the area
@@ -65,7 +66,8 @@ pub fn render_link_picker(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
 
     // Create centered popup area (smaller than full screen)
-    let popup_area = centered_area(area, 80, 60);
+    // Min 30 cols for link text, min 8 rows for header + a few links + footer
+    let popup_area = popup_area(area, 80, 60, 30, 8);
 
     // Clear background
     frame.render_widget(Clear, popup_area);
@@ -327,7 +329,8 @@ pub fn render_theme_picker(frame: &mut Frame, app: &App, area: Rect) {
     ];
 
     // Create centered popup area
-    let popup_area = centered_area(area, 60, 50);
+    // Min 35 cols for theme names, min 12 rows for all themes + header
+    let popup_area = popup_area(area, 60, 50, 35, 12);
 
     // Clear background
     frame.render_widget(Clear, popup_area);
@@ -395,13 +398,18 @@ pub fn render_theme_picker(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_cell_edit_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
 
-    // Create centered popup area
-    let edit_area = Rect {
-        x: area.x + area.width / 4,
-        y: area.y + area.height / 3,
-        width: area.width / 2,
-        height: 5,
-    };
+    // Create centered popup area with safe bounds
+    // Min 20 cols for input text, min 5 rows for the dialog
+    let min_width = 20u16;
+    let min_height = 5u16;
+    let width = (area.width / 2).max(min_width).min(area.width);
+    let height = min_height.min(area.height);
+
+    // Center the popup safely
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+
+    let edit_area = Rect { x, y, width, height };
 
     // Clear background
     frame.render_widget(Clear, edit_area);
@@ -444,10 +452,9 @@ pub fn render_cell_edit_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Render file creation confirmation dialog
 pub fn render_file_create_confirm(frame: &mut Frame, message: &str, theme: &Theme) {
-    use crate::tui::ui::util::centered_area;
-
     // Create a centered dialog area (smaller than help/link picker)
-    let area = centered_area(frame.area(), 50, 20);
+    // Min 30 cols for message, min 7 rows for dialog content
+    let area = popup_area(frame.area(), 50, 20, 30, 7);
 
     // Clear the area
     frame.render_widget(Clear, area);
@@ -493,10 +500,9 @@ pub fn render_file_create_confirm(frame: &mut Frame, message: &str, theme: &Them
 
 /// Render the save width confirmation modal
 pub fn render_save_width_confirm(frame: &mut Frame, width: u16, theme: &Theme) {
-    use crate::tui::ui::util::centered_area;
-
     // Create a centered dialog area
-    let area = centered_area(frame.area(), 45, 18);
+    // Min 28 cols for text, min 7 rows for dialog content
+    let area = popup_area(frame.area(), 45, 18, 28, 7);
 
     // Clear the area
     frame.render_widget(Clear, area);
@@ -539,10 +545,9 @@ pub fn render_save_width_confirm(frame: &mut Frame, width: u16, theme: &Theme) {
 
 /// Render the save before quit confirmation modal
 pub fn render_save_before_quit_confirm(frame: &mut Frame, edit_count: usize, theme: &Theme) {
-    use crate::tui::ui::util::centered_area;
-
     // Create a centered dialog area
-    let area = centered_area(frame.area(), 56, 26);
+    // Min 30 cols for text, min 10 rows for all options
+    let area = popup_area(frame.area(), 56, 26, 30, 10);
 
     // Clear the area
     frame.render_widget(Clear, area);
@@ -599,10 +604,9 @@ pub fn render_save_before_quit_confirm(frame: &mut Frame, edit_count: usize, the
 
 /// Render the save before navigate confirmation modal
 pub fn render_save_before_nav_confirm(frame: &mut Frame, edit_count: usize, theme: &Theme) {
-    use crate::tui::ui::util::centered_area;
-
     // Create a centered dialog area
-    let area = centered_area(frame.area(), 58, 28);
+    // Min 32 cols for text, min 11 rows for all options
+    let area = popup_area(frame.area(), 58, 28, 32, 11);
 
     // Clear the area
     frame.render_widget(Clear, area);
@@ -664,10 +668,10 @@ pub fn render_save_before_nav_confirm(frame: &mut Frame, edit_count: usize, them
 /// Render the command palette with fuzzy search
 pub fn render_command_palette(frame: &mut Frame, app: &App, theme: &Theme) {
     use crate::tui::app::PALETTE_COMMANDS;
-    use crate::tui::ui::util::centered_area;
 
     // Create a centered popup
-    let area = centered_area(frame.area(), 60, 50);
+    // Min 35 cols for command names, min 10 rows for header + a few commands
+    let area = popup_area(frame.area(), 60, 50, 35, 10);
 
     // Clear the area
     frame.render_widget(Clear, area);
