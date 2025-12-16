@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2025-12-15
+
+### Added
+
+- **Navigation save confirmation** - Prompts before navigating away with unsaved changes
+  - Triggered when pressing backspace to go back in file history
+  - Also triggered when following links to other files
+  - Dialog options:
+    - `[y/Enter]` Save & Navigate - saves changes then navigates
+    - `[d]` Discard & Navigate - discards changes and proceeds
+    - `[q]` Discard & Quit - discards changes and exits
+    - `[Esc]` Cancel - stays on current file
+
+- **Quit without saving option** - Added to save before quit dialog
+  - Press `[q]` to quit immediately without saving changes
+  - Press `[y/Enter]` to save and quit (existing behavior)
+  - Press `[Esc]` to cancel and stay (existing behavior)
+
+- **Editor configuration** - Configure external editor via `[editor]` section in config
+  - Specify preferred editor: `editor = "nvim"` or `editor_kind = "NeoVim"`
+  - Add custom arguments: `args = ["--noplugin"]`
+  - Uses [opensesame](https://crates.io/crates/opensesame) EditorConfig
+  - Example config:
+    ```toml
+    [editor]
+    editor = "nvim"
+    args = ["--noplugin"]
+    ```
+
+### Changed
+
+- **opensesame dependency** - Updated to use serde feature for config serialization
+
 ## [0.5.3] - 2025-12-13
 
 ### Added
