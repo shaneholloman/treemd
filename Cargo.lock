@@ -1427,6 +1427,8 @@ dependencies = [
 [[package]]
 name = "opensesame"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e637d0b005617f0167903290252b8210ff8942419b5184557cd158a6db35f47a"
 dependencies = [
  "serde",
  "thiserror 2.0.17",

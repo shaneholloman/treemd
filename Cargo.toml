@@ -80,7 +80,7 @@ supports-color = "3.0"
 notify = "8.0"
 
 # Open files in editor with line:column positioning
-opensesame = { path = "../opensesame", features = ["serde"] }
+opensesame = { version = "0.1.1", features = ["serde"] }
 
 # Unix system calls for TTY handling
 [target.'cfg(unix)'.dependencies]
