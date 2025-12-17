@@ -87,13 +87,9 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
         let _ = watcher.watch(&app.current_file_path);
     }
 
-    // Initialize image picker for graphics protocol detection
-    if let Err(e) = app.image_cache.initialize() {
-        eprintln!("Warning: Image rendering unavailable: {}", e);
-        // Continue without images - will fallback to placeholders
-    } else {
-        // Load first image from the document (was already called in load_document,
-        // but call again here in case it wasn't initialized then)
+    // Load first image from the document if picker is available
+    // (Picker is already initialized in App::new with fallback font size)
+    if app.picker.is_some() {
         let content = app.document.content.clone();
         app.load_first_image(&content);
     }

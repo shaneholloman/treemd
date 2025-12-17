@@ -438,7 +438,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_content_images(frame: &mut Frame, app: &mut App, content: &str, area: Rect) {
-    use ratatui_image::{StatefulImage, Resize};
+    use ratatui_image::{StatefulImage, Resize, FilterType};
 
     // Update image state every frame (recreates protocol with current dimensions)
     app.refresh_image_state();
@@ -467,10 +467,22 @@ fn render_content_images(frame: &mut Frame, app: &mut App, content: &str, area: 
                 frame.render_widget(border, img_panel_area);
 
                 // Render the stateful image inside the border with scaling
-                // Use Scale to upscale small images like GIF frames
-                use ratatui_image::FilterType;
-                let img_widget = StatefulImage::new().resize(Resize::Scale(Some(FilterType::Triangle)));
-                frame.render_stateful_widget(img_widget, inner_area, protocol_state);
+                // Use Scale to upscale small images like GIF frames (like figif does)
+                let resize = Resize::Scale(Some(FilterType::Triangle));
+
+                // Calculate the actual size the image will render at
+                let image_size = protocol_state.size_for(resize.clone(), inner_area);
+
+                // Render the image into a centered area within the inner_area
+                let centered_area = Rect {
+                    x: inner_area.x + (inner_area.width.saturating_sub(image_size.width)) / 2,
+                    y: inner_area.y + (inner_area.height.saturating_sub(image_size.height)) / 2,
+                    width: image_size.width,
+                    height: image_size.height,
+                };
+
+                let img_widget = StatefulImage::new().resize(resize);
+                frame.render_stateful_widget(img_widget, centered_area, protocol_state);
 
                 // Render alt text caption below border
                 let caption_y = img_panel_area.bottom() + 1;

@@ -403,6 +403,9 @@ pub struct App {
     // Image cache for lazy-loaded images
     pub image_cache: ImageCache,
 
+    // Terminal graphics protocol picker (with fallback font size)
+    pub picker: Option<ratatui_image::picker::Picker>,
+
     // Stateful image protocols for rendering (resizable, first image only)
     pub image_state: Option<ratatui_image::protocol::StatefulProtocol>,
     pub image_path: Option<std::path::PathBuf>,
@@ -585,16 +588,44 @@ impl App {
             // Image cache (initialized later after entering alternate screen)
             image_cache: ImageCache::new(),
 
+            // Terminal graphics protocol picker with fallback (like figif)
+            picker: Self::init_picker(),
+
             // First image in document for rendering (stateful for resizing)
             image_state: None,
             image_path: None,
         }
     }
 
-    /// Load first image from document into stateful protocol
+    /// Initialize graphics protocol picker with fallback font size (like figif).
     ///
-    /// Must be called after image_cache.initialize() and document is loaded.
-    /// Uses mutable access to update image state.
+    /// Tries to detect terminal capabilities via Picker::from_query_stdio(), checks
+    /// font size validity, and falls back to a reasonable default if needed.
+    fn init_picker() -> Option<ratatui_image::picker::Picker> {
+        use ratatui_image::picker::Picker;
+
+        match Picker::from_query_stdio() {
+            Ok(picker) => {
+                // Check if font size seems reasonable (at least 4x4 pixels per cell)
+                let (w, h) = picker.font_size();
+                if w < 4 || h < 4 {
+                    // Font size detection failed - use reasonable default
+                    Some(Picker::from_fontsize((9, 18)))
+                } else {
+                    Some(picker)
+                }
+            }
+            Err(_) => {
+                // Query failed - use fallback with common font size (9x18 pixels per cell)
+                Some(Picker::from_fontsize((9, 18)))
+            }
+        }
+    }
+
+    /// Load first image from document into stateful protocol.
+    ///
+    /// Finds the first image in the document content, extracts its first frame
+    /// (for GIFs), and creates a stateful protocol for rendering.
     pub fn load_first_image(&mut self, content: &str) {
         use crate::parser::output::Block as ContentBlock;
         use crate::parser::content::parse_content;
@@ -610,7 +641,7 @@ impl App {
                     match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
                         Ok(img_data) => {
                             // Get picker and create stateful protocol
-                            let picker = match self.image_cache.picker_mut() {
+                            let picker = match &mut self.picker {
                                 Some(p) => p,
                                 None => return,
                             };
@@ -641,7 +672,7 @@ impl App {
             match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
                 Ok(img_data) => {
                     // Get picker and create new protocol state
-                    if let Some(picker) = self.image_cache.picker_mut() {
+                    if let Some(picker) = &mut self.picker {
                         let protocol = picker.new_resize_protocol(img_data);
                         self.image_state = Some(protocol);
                     }
