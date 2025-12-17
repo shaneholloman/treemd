@@ -402,6 +402,10 @@ pub struct App {
 
     // Image cache for lazy-loaded images
     pub image_cache: ImageCache,
+
+    // Cached image protocols (created upfront when document loads)
+    // Allows immutable access during rendering
+    pub image_protocols: std::collections::HashMap<std::path::PathBuf, Box<dyn ratatui_image::protocol::Protocol>>,
 }
 
 /// Saved state for file navigation history
@@ -580,6 +584,55 @@ impl App {
 
             // Image cache (initialized later after entering alternate screen)
             image_cache: ImageCache::new(),
+
+            // Cached image protocols (populated after document loads)
+            image_protocols: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Cache image protocols for all images in the document
+    ///
+    /// This creates Protocol objects upfront while we have mutable access,
+    /// allowing immutable access during rendering. Must be called after
+    /// image_cache.initialize() and document is loaded.
+    pub fn cache_image_protocols(&mut self, content: &str) {
+        use ratatui_image::Resize;
+        use crate::parser::output::Block as ContentBlock;
+        use crate::parser::content::parse_content;
+
+        // Parse content to find images and resolve paths first
+        let blocks = parse_content(content, 0);
+        let mut images_to_load = Vec::new();
+
+        for block in blocks {
+            if let ContentBlock::Image { src, .. } = block {
+                // Try to resolve image path
+                if let Ok(path) = self.resolve_image_path(&src) {
+                    images_to_load.push(path);
+                }
+            }
+        }
+
+        // Now get picker and load all images
+        let picker = match self.image_cache.picker_mut() {
+            Some(p) => p,
+            None => return,
+        };
+
+        for path in images_to_load {
+            // Try to load image file
+            if let Some(img_data) = image::ImageReader::open(&path)
+                .ok()
+                .and_then(|r| r.decode().ok())
+            {
+                // Use default rendering area (will be adjusted during actual render)
+                let rect = ratatui::layout::Rect::new(0, 0, 80, 16);
+
+                // Create protocol using picker
+                if let Ok(protocol) = picker.new_protocol(img_data, rect, Resize::Fit(None)) {
+                    self.image_protocols.insert(path, protocol);
+                }
+            }
         }
     }
 
@@ -3666,6 +3719,10 @@ impl App {
 
         // Clear previous selection tracking
         self.previous_selection = None;
+
+        // Cache image protocols for the new document
+        self.image_protocols.clear();
+        self.cache_image_protocols(&self.document.content.clone());
     }
 
     /// Navigate back in file history

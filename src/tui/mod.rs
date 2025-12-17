@@ -91,6 +91,9 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
     if let Err(e) = app.image_cache.initialize() {
         eprintln!("Warning: Image rendering unavailable: {}", e);
         // Continue without images - will fallback to placeholders
+    } else {
+        // Cache protocols for all images in the document
+        app.cache_image_protocols(&app.document.content.clone());
     }
 
     loop {

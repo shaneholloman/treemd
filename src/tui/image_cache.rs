@@ -105,9 +105,14 @@ impl ImageCache {
         }
     }
 
-    /// Get the Picker instance (if initialized)
+    /// Get an immutable reference to the Picker instance (if initialized)
     pub fn picker(&self) -> Option<&Picker> {
         self.picker.as_ref()
+    }
+
+    /// Get a mutable reference to the Picker instance (if initialized)
+    pub fn picker_mut(&mut self) -> Option<&mut Picker> {
+        self.picker.as_mut()
     }
 
     /// Check if an image is currently cached

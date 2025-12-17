@@ -438,23 +438,51 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_content_images(frame: &mut Frame, app: &App, content: &str, area: Rect) {
-    // TODO: Integrate StatefulImage widget rendering with ratatui-image
-    //
-    // Current limitation: Proper image rendering with ratatui-image requires:
-    // 1. Mutable access to Picker (to create protocols via new_protocol())
-    // 2. Accurate line position tracking through wrapped paragraph text
-    // 3. State management for each rendered image
-    //
-    // Architecture consideration: The Paragraph widget's internal wrapping makes
-    // it difficult to calculate exact line positions where images should appear.
-    // A cleaner approach would be to:
-    // - Render images in a separate layer above the paragraph
-    // - Or refactor rendering to handle images as inline widgets
-    // - Or track image dimensions during text rendering
-    //
-    // For now, images display as text placeholders with alt text and path info.
-    // This maintains functionality while preserving clean code architecture.
-    let _ = (frame, app, content, area);
+    use ratatui_image::Image;
+
+    // Parse content to find images and track their line positions
+    let blocks = parse_content(content, 0);
+    let mut line_num = 0u16;
+
+    for block in blocks {
+        if let ContentBlock::Image { src, .. } = block {
+            // Try to resolve image path
+            if let Ok(path) = app.resolve_image_path(&src) {
+                // Check if protocol is cached
+                if let Some(protocol) = app.image_protocols.get(&path) {
+                    // Calculate position accounting for scroll
+                    let img_y_start = line_num.saturating_sub(app.content_scroll);
+
+                    // Check if image is vertically visible
+                    if img_y_start < area.height.saturating_sub(3) {
+                        // Calculate image area
+                        let img_width = area.width.saturating_sub(4).max(20);
+                        let img_height = 16u16.min(area.height.saturating_sub(img_y_start + 3));
+                        let img_area = Rect {
+                            x: area.x + 2,
+                            y: area.y + 1 + img_y_start,
+                            width: img_width,
+                            height: img_height,
+                        };
+
+                        // Render image using cached protocol
+                        let img_widget = Image::new(protocol.as_ref());
+                        frame.render_widget(img_widget, img_area);
+                    }
+
+                    // Account for image placeholder height
+                    line_num = line_num.saturating_add(18);
+                } else {
+                    line_num = line_num.saturating_add(18);
+                }
+            } else {
+                line_num = line_num.saturating_add(18);
+            }
+        } else {
+            // Rough line estimation for other blocks
+            line_num = line_num.saturating_add(4);
+        }
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
