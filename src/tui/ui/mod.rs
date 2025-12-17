@@ -390,8 +390,6 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
             &theme,
             selected_element_id,
             Some(&interactive_state), // Pass cloned copy to release borrow
-            app,
-            area.width.saturating_sub(4), // Account for borders and padding
         )
     };
 
@@ -420,6 +418,9 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(paragraph, area);
 
+    // Render images overlaid on content area
+    render_content_images(frame, app, &content_text, area);
+
     // Render scrollbar
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(Some("↑"))
@@ -434,6 +435,13 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
         }),
         &mut app.content_scroll_state.clone(),
     );
+}
+
+fn render_content_images(frame: &mut Frame, app: &App, content: &str, area: Rect) {
+    // TODO: Implement StatefulImage widget rendering
+    // This function will render images overlaid on the content area
+    // Currently a placeholder while image rendering is being integrated
+    let _ = (frame, app, content, area);
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -753,8 +761,6 @@ fn render_markdown_enhanced(
     theme: &Theme,
     selected_element_id: Option<crate::tui::interactive::ElementId>,
     interactive_state: Option<&crate::tui::interactive::InteractiveState>,
-    app: &App,
-    available_width: u16,
 ) -> Text<'static> {
     let mut lines = Vec::new();
 
@@ -1173,122 +1179,38 @@ fn render_markdown_enhanced(
                 lines.extend(table_lines);
             }
             ContentBlock::Image { alt, src, .. } => {
-                // Try to resolve and load image
-                match app.resolve_image_path(src) {
-                    Ok(path) => {
-                        if app.image_cache.image_exists(&path) {
-                            // Try to load and render the image
-                            match image::ImageReader::open(&path).ok().and_then(|r| r.decode().ok()) {
-                                Some(img) => {
-                                    // Add selection indicator if needed
-                                    if is_block_selected {
-                                        let mut indicator = vec![Span::styled(
-                                            "→ ",
-                                            Style::default()
-                                                .fg(theme.selection_indicator_fg)
-                                                .bg(theme.selection_indicator_bg)
-                                                .add_modifier(Modifier::BOLD),
-                                        )];
-                                        indicator.push(Span::styled(
-                                            format!("🖼 {}", alt),
-                                            Style::default()
-                                                .fg(Color::Rgb(100, 150, 200))
-                                                .add_modifier(Modifier::ITALIC),
-                                        ));
-                                        lines.push(Line::from(indicator));
-                                    }
+                // Create placeholder space for image
+                // The actual image will be rendered as a StatefulImage widget
+                let mut img_line = vec![];
+                if is_block_selected {
+                    img_line.push(Span::styled(
+                        "→ ",
+                        Style::default()
+                            .fg(theme.selection_indicator_fg)
+                            .bg(theme.selection_indicator_bg)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+                img_line.push(Span::styled(
+                    "🖼 ",
+                    Style::default().fg(Color::Rgb(150, 150, 150)),
+                ));
+                img_line.push(Span::styled(
+                    alt.clone(),
+                    Style::default()
+                        .fg(Color::Rgb(100, 150, 200))
+                        .add_modifier(Modifier::ITALIC),
+                ));
+                img_line.push(Span::raw(" "));
+                img_line.push(Span::styled(
+                    format!("({})", src),
+                    Style::default().fg(Color::Gray),
+                ));
+                lines.push(Line::from(img_line));
 
-                                    // Convert image to halfblocks and render
-                                    // Use 80% of available width to leave margin
-                                    let img_width = (available_width * 4 / 5).max(20);
-                                    let img_height = 16; // Default height in cells
-                                    let halfblock_lines = crate::tui::image_cache::ImageCache::image_to_halfblocks(
-                                        &img,
-                                        img_width,
-                                        img_height,
-                                    );
-                                    lines.extend(halfblock_lines);
-
-                                    // Add alt text caption below image
-                                    lines.push(Line::from(vec![Span::styled(
-                                        format!("  [{}]", alt),
-                                        Style::default().fg(Color::Gray),
-                                    )]));
-                                }
-                                None => {
-                                    // If image fails to load, show error placeholder
-                                    let mut error_line = vec![];
-                                    if is_block_selected {
-                                        error_line.push(Span::styled(
-                                            "→ ",
-                                            Style::default()
-                                                .fg(theme.selection_indicator_fg)
-                                                .bg(theme.selection_indicator_bg)
-                                                .add_modifier(Modifier::BOLD),
-                                        ));
-                                    }
-                                    error_line.push(Span::styled(
-                                        "🖼 ",
-                                        Style::default().fg(Color::Red),
-                                    ));
-                                    error_line.push(Span::styled(
-                                        format!("{} [invalid format]", alt),
-                                        Style::default()
-                                            .fg(Color::Red)
-                                            .add_modifier(Modifier::ITALIC),
-                                    ));
-                                    lines.push(Line::from(error_line));
-                                }
-                            }
-                        } else {
-                            // File not found
-                            let mut error_line = vec![];
-                            if is_block_selected {
-                                error_line.push(Span::styled(
-                                    "→ ",
-                                    Style::default()
-                                        .fg(theme.selection_indicator_fg)
-                                        .bg(theme.selection_indicator_bg)
-                                        .add_modifier(Modifier::BOLD),
-                                ));
-                            }
-                            error_line.push(Span::styled(
-                                "🖼 ",
-                                Style::default().fg(Color::Red),
-                            ));
-                            error_line.push(Span::styled(
-                                format!("{} [not found]", alt),
-                                Style::default()
-                                    .fg(Color::Red)
-                                    .add_modifier(Modifier::ITALIC),
-                            ));
-                            lines.push(Line::from(error_line));
-                        }
-                    }
-                    Err(e) => {
-                        // Path resolution error
-                        let mut error_line = vec![];
-                        if is_block_selected {
-                            error_line.push(Span::styled(
-                                "→ ",
-                                Style::default()
-                                    .fg(theme.selection_indicator_fg)
-                                    .bg(theme.selection_indicator_bg)
-                                    .add_modifier(Modifier::BOLD),
-                            ));
-                        }
-                        error_line.push(Span::styled(
-                            "🖼 ",
-                            Style::default().fg(Color::Red),
-                        ));
-                        error_line.push(Span::styled(
-                            format!("{} [error: {}]", alt, e),
-                            Style::default()
-                                .fg(Color::Red)
-                                .add_modifier(Modifier::ITALIC),
-                        ));
-                        lines.push(Line::from(error_line));
-                    }
+                // Add empty lines as placeholder for image height (16 cells)
+                for _ in 0..16 {
+                    lines.push(Line::from(""));
                 }
             }
             ContentBlock::Details {
