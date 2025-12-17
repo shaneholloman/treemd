@@ -445,12 +445,28 @@ fn render_content_images(frame: &mut Frame, app: &mut App, content: &str, area: 
 
     // Only render if we have an image
     if let (Some(protocol_state), Some(_path)) = (&mut app.image_state, &app.image_path) {
-        eprintln!("[DEBUG RENDER] Image state exists, rendering");
-        // Find the first image block (can appear anywhere, not just at start)
+        // Find the first image (checking both inline and block-level for robustness)
+        // Note: Most images appear as inline elements within Paragraph blocks
         let blocks = parse_content(content, 0);
+
         for block in blocks {
-            if let ContentBlock::Image { alt, .. } = block {
-                eprintln!("[DEBUG RENDER] Found image block, rendering to area: {:?}", area);
+            let alt_text = match &block {
+                ContentBlock::Image { alt, .. } => Some(alt.clone()),
+                ContentBlock::Paragraph { inline, .. } => {
+                    // Look for first inline image in paragraph
+                    inline.iter()
+                        .find_map(|elem| {
+                            if let crate::parser::output::InlineElement::Image { alt, .. } = elem {
+                                Some(alt.clone())
+                            } else {
+                                None
+                            }
+                        })
+                }
+                _ => None,
+            };
+
+            if let Some(alt) = alt_text {
                 // Allocate space in top-right corner for the image
                 // Use ~30% of width for image, leave text on left
                 let img_panel_width = (area.width / 3).max(20);
@@ -498,7 +514,7 @@ fn render_content_images(frame: &mut Frame, app: &mut App, content: &str, area: 
                     let caption = ratatui::widgets::Paragraph::new(
                         ratatui::text::Line::from(
                             ratatui::text::Span::styled(
-                                alt.clone(),
+                                alt,
                                 ratatui::style::Style::default()
                                     .fg(ratatui::style::Color::Cyan),
                             )

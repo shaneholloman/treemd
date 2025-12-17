@@ -632,35 +632,23 @@ impl App {
 
         // Parse content to find first image
         let blocks = parse_content(content, 0);
-        eprintln!("[DEBUG] Parsed {} blocks from content", blocks.len());
-        for block in &blocks {
-            match block {
-                ContentBlock::Paragraph { .. } => eprintln!("[DEBUG] Block type: Paragraph"),
-                ContentBlock::Image { .. } => eprintln!("[DEBUG] Block type: Image"),
-                ContentBlock::Heading { .. } => eprintln!("[DEBUG] Block type: Heading"),
-                ContentBlock::List { .. } => eprintln!("[DEBUG] Block type: List"),
-                ContentBlock::Blockquote { .. } => eprintln!("[DEBUG] Block type: Blockquote"),
-                ContentBlock::HorizontalRule => eprintln!("[DEBUG] Block type: HorizontalRule"),
-                _ => eprintln!("[DEBUG] Block type: Other"),
-            }
-        }
 
         for block in blocks {
             // Check for block-level images
             if let ContentBlock::Image { src, .. } = &block {
-                eprintln!("[DEBUG] Found image block with src: {}", src);
                 if self.try_load_image_from_src(src) {
+                    eprintln!("✓ Image loaded: {}", src);
                     return;
                 }
             }
 
             // Check for inline images within paragraphs
+            // (Most markdown images appear as inline elements, not block-level)
             if let ContentBlock::Paragraph { inline, .. } = &block {
-                eprintln!("[DEBUG] Checking paragraph for inline images");
                 for inline_elem in inline {
                     if let crate::parser::output::InlineElement::Image { src, .. } = inline_elem {
-                        eprintln!("[DEBUG] Found inline image with src: {}", src);
                         if self.try_load_image_from_src(src) {
+                            eprintln!("✓ Image loaded: {}", src);
                             return;
                         }
                     }
@@ -668,68 +656,48 @@ impl App {
             }
         }
 
-        // No image found, clear state
-        eprintln!("[DEBUG] No image found or all images failed to load");
+        // No image found, clear state (not an error - just no images in document)
         self.image_state = None;
         self.image_path = None;
     }
 
     /// Try to load an image from a source path (helper for load_first_image).
     /// Returns true if successfully loaded, false otherwise.
+    /// Fails silently if path resolution, file loading, or picker availability fails.
     fn try_load_image_from_src(&mut self, src: &str) -> bool {
-        // Try to resolve image path
-        match self.resolve_image_path(src) {
-            Ok(path) => {
-                eprintln!("[DEBUG] Resolved image path to: {:?}", path);
-                // Try to load image file (with GIF first-frame extraction)
-                match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
-                    Ok(img_data) => {
-                        eprintln!("[DEBUG] Successfully extracted first frame from image");
-                        // Get picker and create stateful protocol
-                        if let Some(picker) = &mut self.picker {
-                            eprintln!("[DEBUG] Picker is available");
-                            let protocol = picker.new_resize_protocol(img_data);
-                            self.image_state = Some(protocol);
-                            self.image_path = Some(path);
-                            eprintln!("[DEBUG] Successfully created image protocol");
-                            true
-                        } else {
-                            eprintln!("[DEBUG] ERROR: Picker is None!");
-                            false
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[DEBUG] Failed to extract image frame: {:?}", e);
-                        false
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[DEBUG] Failed to resolve image path: {}", e);
-                false
-            }
-        }
+        // Resolve image path relative to current file
+        let path = match self.resolve_image_path(src) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        // Load image file (with GIF first-frame extraction)
+        let img_data = match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
+            Ok(data) => data,
+            Err(_) => return false,
+        };
+
+        // Create stateful protocol with the picker
+        let picker = match self.picker.as_mut() {
+            Some(p) => p,
+            None => return false,
+        };
+
+        let protocol = picker.new_resize_protocol(img_data);
+        self.image_state = Some(protocol);
+        self.image_path = Some(path);
+        true
     }
 
     /// Refresh image state by reloading from path (call every render to update protocol)
     pub fn refresh_image_state(&mut self) {
         if let Some(path) = self.image_path.clone() {
             // Reload the image and recreate the protocol
-            match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
-                Ok(img_data) => {
-                    // Get picker and create new protocol state
-                    if let Some(picker) = &mut self.picker {
-                        let protocol = picker.new_resize_protocol(img_data);
-                        self.image_state = Some(protocol);
-                    } else {
-                        eprintln!("[DEBUG REFRESH] Picker is None!");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[DEBUG REFRESH] Failed to extract image: {:?}", e);
-                    // Image load failed, clear state
-                    self.image_state = None;
-                    self.image_path = None;
+            // Silently fail on errors - just don't render the image
+            if let Ok(img_data) = crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
+                if let Some(picker) = &mut self.picker {
+                    let protocol = picker.new_resize_protocol(img_data);
+                    self.image_state = Some(protocol);
                 }
             }
         }
