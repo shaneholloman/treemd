@@ -391,6 +391,7 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
             selected_element_id,
             Some(&interactive_state), // Pass cloned copy to release borrow
             app,
+            area.width.saturating_sub(4), // Account for borders and padding
         )
     };
 
@@ -753,6 +754,7 @@ fn render_markdown_enhanced(
     selected_element_id: Option<crate::tui::interactive::ElementId>,
     interactive_state: Option<&crate::tui::interactive::InteractiveState>,
     app: &App,
+    available_width: u16,
 ) -> Text<'static> {
     let mut lines = Vec::new();
 
@@ -1171,52 +1173,123 @@ fn render_markdown_enhanced(
                 lines.extend(table_lines);
             }
             ContentBlock::Image { alt, src, .. } => {
-                // Try to resolve image path
-                let (resolved_path, status_text, status_color) = match app.resolve_image_path(src) {
+                // Try to resolve and load image
+                match app.resolve_image_path(src) {
                     Ok(path) => {
                         if app.image_cache.image_exists(&path) {
-                            (Some(path), "ready".to_string(), Color::Green)
+                            // Try to load and render the image
+                            match image::ImageReader::open(&path).ok().and_then(|r| r.decode().ok()) {
+                                Some(img) => {
+                                    // Add selection indicator if needed
+                                    if is_block_selected {
+                                        let mut indicator = vec![Span::styled(
+                                            "→ ",
+                                            Style::default()
+                                                .fg(theme.selection_indicator_fg)
+                                                .bg(theme.selection_indicator_bg)
+                                                .add_modifier(Modifier::BOLD),
+                                        )];
+                                        indicator.push(Span::styled(
+                                            format!("🖼 {}", alt),
+                                            Style::default()
+                                                .fg(Color::Rgb(100, 150, 200))
+                                                .add_modifier(Modifier::ITALIC),
+                                        ));
+                                        lines.push(Line::from(indicator));
+                                    }
+
+                                    // Convert image to halfblocks and render
+                                    // Use 80% of available width to leave margin
+                                    let img_width = (available_width * 4 / 5).max(20);
+                                    let img_height = 16; // Default height in cells
+                                    let halfblock_lines = crate::tui::image_cache::ImageCache::image_to_halfblocks(
+                                        &img,
+                                        img_width,
+                                        img_height,
+                                    );
+                                    lines.extend(halfblock_lines);
+
+                                    // Add alt text caption below image
+                                    lines.push(Line::from(vec![Span::styled(
+                                        format!("  [{}]", alt),
+                                        Style::default().fg(Color::Gray),
+                                    )]));
+                                }
+                                None => {
+                                    // If image fails to load, show error placeholder
+                                    let mut error_line = vec![];
+                                    if is_block_selected {
+                                        error_line.push(Span::styled(
+                                            "→ ",
+                                            Style::default()
+                                                .fg(theme.selection_indicator_fg)
+                                                .bg(theme.selection_indicator_bg)
+                                                .add_modifier(Modifier::BOLD),
+                                        ));
+                                    }
+                                    error_line.push(Span::styled(
+                                        "🖼 ",
+                                        Style::default().fg(Color::Red),
+                                    ));
+                                    error_line.push(Span::styled(
+                                        format!("{} [invalid format]", alt),
+                                        Style::default()
+                                            .fg(Color::Red)
+                                            .add_modifier(Modifier::ITALIC),
+                                    ));
+                                    lines.push(Line::from(error_line));
+                                }
+                            }
                         } else {
-                            (None, "not found".to_string(), Color::Red)
+                            // File not found
+                            let mut error_line = vec![];
+                            if is_block_selected {
+                                error_line.push(Span::styled(
+                                    "→ ",
+                                    Style::default()
+                                        .fg(theme.selection_indicator_fg)
+                                        .bg(theme.selection_indicator_bg)
+                                        .add_modifier(Modifier::BOLD),
+                                ));
+                            }
+                            error_line.push(Span::styled(
+                                "🖼 ",
+                                Style::default().fg(Color::Red),
+                            ));
+                            error_line.push(Span::styled(
+                                format!("{} [not found]", alt),
+                                Style::default()
+                                    .fg(Color::Red)
+                                    .add_modifier(Modifier::ITALIC),
+                            ));
+                            lines.push(Line::from(error_line));
                         }
                     }
-                    Err(e) => (None, format!("error: {}", e), Color::Red),
-                };
-
-                // Render image placeholder with path info
-                let mut image_spans = vec![];
-                if is_block_selected {
-                    image_spans.push(Span::styled(
-                        "→ ",
-                        Style::default()
-                            .fg(theme.selection_indicator_fg)
-                            .bg(theme.selection_indicator_bg)
-                            .add_modifier(Modifier::BOLD),
-                    ));
+                    Err(e) => {
+                        // Path resolution error
+                        let mut error_line = vec![];
+                        if is_block_selected {
+                            error_line.push(Span::styled(
+                                "→ ",
+                                Style::default()
+                                    .fg(theme.selection_indicator_fg)
+                                    .bg(theme.selection_indicator_bg)
+                                    .add_modifier(Modifier::BOLD),
+                            ));
+                        }
+                        error_line.push(Span::styled(
+                            "🖼 ",
+                            Style::default().fg(Color::Red),
+                        ));
+                        error_line.push(Span::styled(
+                            format!("{} [error: {}]", alt, e),
+                            Style::default()
+                                .fg(Color::Red)
+                                .add_modifier(Modifier::ITALIC),
+                        ));
+                        lines.push(Line::from(error_line));
+                    }
                 }
-                image_spans.push(Span::styled(
-                    "🖼 ",
-                    Style::default().fg(Color::Rgb(150, 150, 150)),
-                ));
-                image_spans.push(Span::styled(
-                    alt.clone(),
-                    Style::default()
-                        .fg(Color::Rgb(100, 150, 200))
-                        .add_modifier(Modifier::ITALIC),
-                ));
-                image_spans.push(Span::raw(" "));
-                image_spans.push(Span::styled(
-                    format!("[{}]", status_text),
-                    Style::default().fg(status_color),
-                ));
-                if resolved_path.is_some() {
-                    image_spans.push(Span::raw(" "));
-                    image_spans.push(Span::styled(
-                        format!("({})", src),
-                        Style::default().fg(Color::Gray),
-                    ));
-                }
-                lines.push(Line::from(image_spans));
             }
             ContentBlock::Details {
                 summary,

@@ -15,7 +15,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use image::GenericImageView;
+use image::{DynamicImage, GenericImageView, imageops::FilterType};
+use ratatui::style::Color;
+use ratatui::text::{Line, Span};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
@@ -235,6 +237,72 @@ impl ImageCache {
     /// Get cache statistics for debugging
     pub fn cache_stats(&self) -> (usize, usize) {
         (self.loaded_images.len(), self.max_cache_size)
+    }
+
+    /// Convert an image to halfblock representation for terminal rendering
+    ///
+    /// Returns a vector of Lines containing Unicode halfblock characters with
+    /// colored foreground/background to represent the image. This can be
+    /// included directly in the rendered content without needing widget integration.
+    ///
+    /// # Arguments
+    /// * `image` - The image to convert
+    /// * `width` - Terminal width in cells
+    /// * `max_height` - Maximum height in cells (will be capped)
+    pub fn image_to_halfblocks(
+        image: &DynamicImage,
+        width: u16,
+        max_height: u16,
+    ) -> Vec<Line<'static>> {
+        if width == 0 {
+            return vec![];
+        }
+
+        // Cap height to reasonable terminal size
+        let height = std::cmp::min(max_height, 30);
+
+        // Resize image to terminal dimensions
+        // Halfblocks work by combining two pixels vertically, so we need 2x height pixels
+        let resized = image.resize_exact(
+            width as u32,
+            (height * 2) as u32,
+            FilterType::Triangle,
+        );
+
+        let rgb_image = resized.to_rgb8();
+        let mut lines = Vec::new();
+
+        // Convert pixels to halfblocks
+        // Each row of halfblocks represents 2 rows of pixels (upper + lower half)
+        for y in (0..height).rev() {
+            let mut spans = Vec::new();
+            for x in 0..width {
+                let x_idx = x as usize;
+                let upper_y = (y * 2) as usize;
+                let lower_y = (y * 2 + 1) as usize;
+
+                // Get pixel colors
+                let upper_pixel = *rgb_image.get_pixel(x_idx as u32, upper_y as u32);
+                let lower_pixel = *rgb_image.get_pixel(x_idx as u32, lower_y as u32);
+
+                let upper_color =
+                    Color::Rgb(upper_pixel[0], upper_pixel[1], upper_pixel[2]);
+                let lower_color =
+                    Color::Rgb(lower_pixel[0], lower_pixel[1], lower_pixel[2]);
+
+                spans.push(
+                    Span::styled(
+                        "▀",
+                        ratatui::style::Style::default()
+                            .fg(upper_color)
+                            .bg(lower_color),
+                    )
+                );
+            }
+            lines.push(Line::from(spans));
+        }
+
+        lines
     }
 }
 
