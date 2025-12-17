@@ -438,9 +438,22 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_content_images(frame: &mut Frame, app: &App, content: &str, area: Rect) {
-    // TODO: Implement StatefulImage widget rendering
-    // This function will render images overlaid on the content area
-    // Currently a placeholder while image rendering is being integrated
+    // TODO: Integrate StatefulImage widget rendering with ratatui-image
+    //
+    // Current limitation: Proper image rendering with ratatui-image requires:
+    // 1. Mutable access to Picker (to create protocols via new_protocol())
+    // 2. Accurate line position tracking through wrapped paragraph text
+    // 3. State management for each rendered image
+    //
+    // Architecture consideration: The Paragraph widget's internal wrapping makes
+    // it difficult to calculate exact line positions where images should appear.
+    // A cleaner approach would be to:
+    // - Render images in a separate layer above the paragraph
+    // - Or refactor rendering to handle images as inline widgets
+    // - Or track image dimensions during text rendering
+    //
+    // For now, images display as text placeholders with alt text and path info.
+    // This maintains functionality while preserving clean code architecture.
     let _ = (frame, app, content, area);
 }
 
