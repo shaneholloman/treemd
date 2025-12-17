@@ -632,45 +632,37 @@ impl App {
 
         // Parse content to find first image
         let blocks = parse_content(content, 0);
+        eprintln!("[DEBUG] Parsed {} blocks from content", blocks.len());
+        for block in &blocks {
+            match block {
+                ContentBlock::Paragraph { .. } => eprintln!("[DEBUG] Block type: Paragraph"),
+                ContentBlock::Image { .. } => eprintln!("[DEBUG] Block type: Image"),
+                ContentBlock::Heading { .. } => eprintln!("[DEBUG] Block type: Heading"),
+                ContentBlock::List { .. } => eprintln!("[DEBUG] Block type: List"),
+                ContentBlock::Blockquote { .. } => eprintln!("[DEBUG] Block type: Blockquote"),
+                ContentBlock::HorizontalRule => eprintln!("[DEBUG] Block type: HorizontalRule"),
+                _ => eprintln!("[DEBUG] Block type: Other"),
+            }
+        }
 
         for block in blocks {
-            if let ContentBlock::Image { src, .. } = block {
-                eprintln!("[DEBUG] Found image with src: {}", src);
-                // Try to resolve image path
-                match self.resolve_image_path(&src) {
-                    Ok(path) => {
-                        eprintln!("[DEBUG] Resolved image path to: {:?}", path);
-                        // Try to load image file (with GIF first-frame extraction)
-                        match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
-                            Ok(img_data) => {
-                                eprintln!("[DEBUG] Successfully extracted first frame from image");
-                                // Get picker and create stateful protocol
-                                let picker = match &mut self.picker {
-                                    Some(p) => {
-                                        eprintln!("[DEBUG] Picker is available");
-                                        p
-                                    }
-                                    None => {
-                                        eprintln!("[DEBUG] ERROR: Picker is None!");
-                                        return;
-                                    }
-                                };
+            // Check for block-level images
+            if let ContentBlock::Image { src, .. } = &block {
+                eprintln!("[DEBUG] Found image block with src: {}", src);
+                if self.try_load_image_from_src(src) {
+                    return;
+                }
+            }
 
-                                let protocol = picker.new_resize_protocol(img_data);
-                                self.image_state = Some(protocol);
-                                self.image_path = Some(path);
-                                eprintln!("[DEBUG] Successfully created image protocol");
-                                return; // Only load first image
-                            }
-                            Err(e) => {
-                                eprintln!("[DEBUG] Failed to extract image frame: {:?}", e);
-                                // This image failed, try next
-                                continue;
-                            }
+            // Check for inline images within paragraphs
+            if let ContentBlock::Paragraph { inline, .. } = &block {
+                eprintln!("[DEBUG] Checking paragraph for inline images");
+                for inline_elem in inline {
+                    if let crate::parser::output::InlineElement::Image { src, .. } = inline_elem {
+                        eprintln!("[DEBUG] Found inline image with src: {}", src);
+                        if self.try_load_image_from_src(src) {
+                            return;
                         }
-                    }
-                    Err(e) => {
-                        eprintln!("[DEBUG] Failed to resolve image path: {}", e);
                     }
                 }
             }
@@ -680,6 +672,43 @@ impl App {
         eprintln!("[DEBUG] No image found or all images failed to load");
         self.image_state = None;
         self.image_path = None;
+    }
+
+    /// Try to load an image from a source path (helper for load_first_image).
+    /// Returns true if successfully loaded, false otherwise.
+    fn try_load_image_from_src(&mut self, src: &str) -> bool {
+        // Try to resolve image path
+        match self.resolve_image_path(src) {
+            Ok(path) => {
+                eprintln!("[DEBUG] Resolved image path to: {:?}", path);
+                // Try to load image file (with GIF first-frame extraction)
+                match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
+                    Ok(img_data) => {
+                        eprintln!("[DEBUG] Successfully extracted first frame from image");
+                        // Get picker and create stateful protocol
+                        if let Some(picker) = &mut self.picker {
+                            eprintln!("[DEBUG] Picker is available");
+                            let protocol = picker.new_resize_protocol(img_data);
+                            self.image_state = Some(protocol);
+                            self.image_path = Some(path);
+                            eprintln!("[DEBUG] Successfully created image protocol");
+                            true
+                        } else {
+                            eprintln!("[DEBUG] ERROR: Picker is None!");
+                            false
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[DEBUG] Failed to extract image frame: {:?}", e);
+                        false
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[DEBUG] Failed to resolve image path: {}", e);
+                false
+            }
+        }
     }
 
     /// Refresh image state by reloading from path (call every render to update protocol)
