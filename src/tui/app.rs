@@ -403,9 +403,9 @@ pub struct App {
     // Image cache for lazy-loaded images
     pub image_cache: ImageCache,
 
-    // Cached image protocols (created upfront when document loads)
-    // Allows immutable access during rendering
-    pub image_protocols: std::collections::HashMap<std::path::PathBuf, Box<dyn ratatui_image::protocol::Protocol>>,
+    // Stateful image protocols for rendering (resizable, first image only)
+    pub image_state: Option<Box<dyn ratatui_image::protocol::StatefulProtocol>>,
+    pub image_path: Option<std::path::PathBuf>,
 }
 
 /// Saved state for file navigation history
@@ -585,57 +585,53 @@ impl App {
             // Image cache (initialized later after entering alternate screen)
             image_cache: ImageCache::new(),
 
-            // Cached image protocols (populated after document loads)
-            image_protocols: std::collections::HashMap::new(),
+            // First image in document for rendering (stateful for resizing)
+            image_state: None,
+            image_path: None,
         }
     }
 
-    /// Cache image protocols for all images in the document
+    /// Load first image from document into stateful protocol
     ///
-    /// This creates Protocol objects upfront while we have mutable access,
-    /// allowing immutable access during rendering. Must be called after
-    /// image_cache.initialize() and document is loaded.
-    pub fn cache_image_protocols(&mut self, content: &str) {
-        use ratatui_image::Resize;
+    /// Must be called after image_cache.initialize() and document is loaded.
+    /// Uses mutable access to update image state.
+    pub fn load_first_image(&mut self, content: &str) {
         use crate::parser::output::Block as ContentBlock;
         use crate::parser::content::parse_content;
 
-        // Parse content to find images and resolve paths first
+        // Parse content to find first image
         let blocks = parse_content(content, 0);
-        let mut images_to_load = Vec::new();
 
         for block in blocks {
             if let ContentBlock::Image { src, .. } = block {
                 // Try to resolve image path
                 if let Ok(path) = self.resolve_image_path(&src) {
-                    images_to_load.push(path);
-                }
-            }
-        }
+                    // Try to load image file (with GIF first-frame extraction)
+                    match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
+                        Ok(img_data) => {
+                            // Get picker and create stateful protocol
+                            let picker = match self.image_cache.picker_mut() {
+                                Some(p) => p,
+                                None => return,
+                            };
 
-        // Now get picker and load all images
-        let picker = match self.image_cache.picker_mut() {
-            Some(p) => p,
-            None => return,
-        };
-
-        for path in images_to_load {
-            // Try to load image file (with GIF first-frame extraction)
-            match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
-                Ok(img_data) => {
-                    // Use default rendering area (will be adjusted during actual render)
-                    let rect = ratatui::layout::Rect::new(0, 0, 80, 16);
-
-                    // Create protocol using picker
-                    if let Ok(protocol) = picker.new_protocol(img_data, rect, Resize::Fit(None)) {
-                        self.image_protocols.insert(path, protocol);
+                            let protocol = picker.new_resize_protocol(img_data);
+                            self.image_state = Some(protocol);
+                            self.image_path = Some(path);
+                            return; // Only load first image
+                        }
+                        Err(_) => {
+                            // This image failed, try next
+                            continue;
+                        }
                     }
                 }
-                Err(_) => {
-                    // Image load failed, skip it
-                }
             }
         }
+
+        // No image found, clear state
+        self.image_state = None;
+        self.image_path = None;
     }
 
     /// Update the content viewport height (called by UI when terminal size is known)
@@ -3722,9 +3718,9 @@ impl App {
         // Clear previous selection tracking
         self.previous_selection = None;
 
-        // Cache image protocols for the new document
-        self.image_protocols.clear();
-        self.cache_image_protocols(&self.document.content.clone());
+        // Load first image from the new document
+        let content = self.document.content.clone();
+        self.load_first_image(&content);
     }
 
     /// Navigate back in file history
