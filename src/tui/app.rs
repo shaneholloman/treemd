@@ -634,6 +634,27 @@ impl App {
         self.image_path = None;
     }
 
+    /// Refresh image state by reloading from path (call every render to update protocol)
+    pub fn refresh_image_state(&mut self) {
+        if let Some(path) = self.image_path.clone() {
+            // Reload the image and recreate the protocol
+            match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
+                Ok(img_data) => {
+                    // Get picker and create new protocol state
+                    if let Some(picker) = self.image_cache.picker_mut() {
+                        let protocol = picker.new_resize_protocol(img_data);
+                        self.image_state = Some(protocol);
+                    }
+                }
+                Err(_) => {
+                    // Image load failed, clear state
+                    self.image_state = None;
+                    self.image_path = None;
+                }
+            }
+        }
+    }
+
     /// Update the content viewport height (called by UI when terminal size is known)
     pub fn set_viewport_height(&mut self, height: u16) {
         self.content_viewport_height = height.max(1); // Ensure at least 1 to avoid divide-by-zero

@@ -440,6 +440,9 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_content_images(frame: &mut Frame, app: &mut App, content: &str, area: Rect) {
     use ratatui_image::{StatefulImage, Resize};
 
+    // Update image state every frame (recreates protocol with current dimensions)
+    app.refresh_image_state();
+
     // Only render if we have an image in the first position
     if let (Some(protocol_state), Some(_path)) = (&mut app.image_state, &app.image_path) {
         // Check if image is at the start of content (first block)
