@@ -457,7 +457,7 @@ fn render_content_images(frame: &mut Frame, app: &mut App, content: &str, area: 
                 };
 
                 // Render the stateful image with resizing
-                let img_widget = StatefulImage::new(None).resize(Resize::Fit(None));
+                let img_widget = StatefulImage::new().resize(Resize::Fit(None));
                 frame.render_stateful_widget(img_widget, img_area, protocol_state);
 
                 // Render alt text caption below

@@ -404,7 +404,7 @@ pub struct App {
     pub image_cache: ImageCache,
 
     // Stateful image protocols for rendering (resizable, first image only)
-    pub image_state: Option<Box<dyn ratatui_image::protocol::StatefulProtocol>>,
+    pub image_state: Option<ratatui_image::protocol::StatefulProtocol>,
     pub image_path: Option<std::path::PathBuf>,
 }
 

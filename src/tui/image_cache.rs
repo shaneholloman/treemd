@@ -18,7 +18,7 @@ use std::io::BufReader;
 
 use image::{GenericImageView, RgbaImage, Rgba};
 use ratatui_image::picker::Picker;
-use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::protocol::StatefulProtocol as RatatuiStatefulProtocol;
 
 /// Result type for image cache operations
 pub type ImageCacheResult<T> = Result<T, ImageError>;
@@ -52,7 +52,7 @@ impl std::error::Error for ImageError {}
 /// Cached image with metadata
 struct CachedImage {
     /// The loaded image protocol
-    protocol: Box<dyn StatefulProtocol>,
+    protocol: RatatuiStatefulProtocol,
     /// Last access time for LRU eviction
     last_used: Instant,
     /// Original image width in pixels
@@ -93,7 +93,7 @@ impl ImageCache {
     /// This should be called once after entering alternate screen mode.
     /// If initialization fails, images will fallback to placeholder rendering.
     pub fn initialize(&mut self) -> Result<(), String> {
-        match Picker::from_termios() {
+        match Picker::from_query_stdio() {
             Ok(picker) => {
                 self.picker = Some(picker);
                 Ok(())
@@ -192,10 +192,11 @@ impl ImageCache {
     }
 
     /// Get a reference to a cached image's protocol
-    pub fn get_protocol(&mut self, path: &Path) -> Option<&dyn StatefulProtocol> {
+    #[allow(dead_code)]
+    pub fn get_protocol(&mut self, path: &Path) -> Option<&RatatuiStatefulProtocol> {
         if let Some(cached) = self.loaded_images.get_mut(path) {
             cached.last_used = Instant::now();
-            return Some(&*cached.protocol);
+            return Some(&cached.protocol);
         }
         None
     }
