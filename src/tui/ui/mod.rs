@@ -330,7 +330,8 @@ fn render_outline(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_content(frame: &mut Frame, app: &App, area: Rect) {
     use crate::tui::app::AppMode;
 
-    let theme = &app.theme;
+    // Clone theme early to avoid borrow conflicts
+    let theme = app.theme.clone();
     let block_style = theme.border_style(app.focus == Focus::Content);
 
     // Get content for selected section and determine title
@@ -371,23 +372,25 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
     // Check if we should render raw source or enhanced markdown
     let mut rendered_text = if app.show_raw_source {
         // Raw source view - show unprocessed markdown
-        render_raw_markdown(&content_text, theme)
+        render_raw_markdown(&content_text, &theme)
     } else {
         // Enhanced markdown rendering with syntax highlighting
-        // Always pass interactive state for expansion persistence
-        // Only show selection highlight in Interactive mode
+        // Pre-extract what we need before passing app as mutable to avoid borrow conflicts
         let selected_element_id = if app.mode == AppMode::Interactive {
             app.interactive_state.current_element().map(|elem| elem.id)
         } else {
             None
         };
+        // Clone interactive state to avoid keeping a borrow when passing app as mutable
+        let interactive_state = app.interactive_state.clone();
 
         render_markdown_enhanced(
             &content_text,
             &app.highlighter,
-            theme,
+            &theme,
             selected_element_id,
-            Some(&app.interactive_state), // Always pass for expansion state
+            Some(&interactive_state), // Pass cloned copy to release borrow
+            app,
         )
     };
 
@@ -399,7 +402,7 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
             &app.doc_search_query,
             app.doc_search_current_idx,
             app.doc_search_matches.len(),
-            theme,
+            &theme,
         );
     }
 
@@ -749,6 +752,7 @@ fn render_markdown_enhanced(
     theme: &Theme,
     selected_element_id: Option<crate::tui::interactive::ElementId>,
     interactive_state: Option<&crate::tui::interactive::InteractiveState>,
+    app: &App,
 ) -> Text<'static> {
     let mut lines = Vec::new();
 
@@ -1166,8 +1170,20 @@ fn render_markdown_enhanced(
                 );
                 lines.extend(table_lines);
             }
-            ContentBlock::Image { alt, .. } => {
-                // Render image as placeholder with alt text only
+            ContentBlock::Image { alt, src, .. } => {
+                // Try to resolve image path
+                let (resolved_path, status_text, status_color) = match app.resolve_image_path(src) {
+                    Ok(path) => {
+                        if app.image_cache.image_exists(&path) {
+                            (Some(path), "ready".to_string(), Color::Green)
+                        } else {
+                            (None, "not found".to_string(), Color::Red)
+                        }
+                    }
+                    Err(e) => (None, format!("error: {}", e), Color::Red),
+                };
+
+                // Render image placeholder with path info
                 let mut image_spans = vec![];
                 if is_block_selected {
                     image_spans.push(Span::styled(
@@ -1188,6 +1204,18 @@ fn render_markdown_enhanced(
                         .fg(Color::Rgb(100, 150, 200))
                         .add_modifier(Modifier::ITALIC),
                 ));
+                image_spans.push(Span::raw(" "));
+                image_spans.push(Span::styled(
+                    format!("[{}]", status_text),
+                    Style::default().fg(status_color),
+                ));
+                if resolved_path.is_some() {
+                    image_spans.push(Span::raw(" "));
+                    image_spans.push(Span::styled(
+                        format!("({})", src),
+                        Style::default().fg(Color::Gray),
+                    ));
+                }
                 lines.push(Line::from(image_spans));
             }
             ContentBlock::Details {
