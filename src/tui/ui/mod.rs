@@ -445,10 +445,12 @@ fn render_content_images(frame: &mut Frame, app: &mut App, content: &str, area: 
 
     // Only render if we have an image
     if let (Some(protocol_state), Some(_path)) = (&mut app.image_state, &app.image_path) {
+        eprintln!("[DEBUG RENDER] Image state exists, rendering");
         // Find the first image block (can appear anywhere, not just at start)
         let blocks = parse_content(content, 0);
         for block in blocks {
             if let ContentBlock::Image { alt, .. } = block {
+                eprintln!("[DEBUG RENDER] Found image block, rendering to area: {:?}", area);
                 // Allocate space in top-right corner for the image
                 // Use ~30% of width for image, leave text on left
                 let img_panel_width = (area.width / 3).max(20);

@@ -635,32 +635,49 @@ impl App {
 
         for block in blocks {
             if let ContentBlock::Image { src, .. } = block {
+                eprintln!("[DEBUG] Found image with src: {}", src);
                 // Try to resolve image path
-                if let Ok(path) = self.resolve_image_path(&src) {
-                    // Try to load image file (with GIF first-frame extraction)
-                    match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
-                        Ok(img_data) => {
-                            // Get picker and create stateful protocol
-                            let picker = match &mut self.picker {
-                                Some(p) => p,
-                                None => return,
-                            };
+                match self.resolve_image_path(&src) {
+                    Ok(path) => {
+                        eprintln!("[DEBUG] Resolved image path to: {:?}", path);
+                        // Try to load image file (with GIF first-frame extraction)
+                        match crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
+                            Ok(img_data) => {
+                                eprintln!("[DEBUG] Successfully extracted first frame from image");
+                                // Get picker and create stateful protocol
+                                let picker = match &mut self.picker {
+                                    Some(p) => {
+                                        eprintln!("[DEBUG] Picker is available");
+                                        p
+                                    }
+                                    None => {
+                                        eprintln!("[DEBUG] ERROR: Picker is None!");
+                                        return;
+                                    }
+                                };
 
-                            let protocol = picker.new_resize_protocol(img_data);
-                            self.image_state = Some(protocol);
-                            self.image_path = Some(path);
-                            return; // Only load first image
+                                let protocol = picker.new_resize_protocol(img_data);
+                                self.image_state = Some(protocol);
+                                self.image_path = Some(path);
+                                eprintln!("[DEBUG] Successfully created image protocol");
+                                return; // Only load first image
+                            }
+                            Err(e) => {
+                                eprintln!("[DEBUG] Failed to extract image frame: {:?}", e);
+                                // This image failed, try next
+                                continue;
+                            }
                         }
-                        Err(_) => {
-                            // This image failed, try next
-                            continue;
-                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[DEBUG] Failed to resolve image path: {}", e);
                     }
                 }
             }
         }
 
         // No image found, clear state
+        eprintln!("[DEBUG] No image found or all images failed to load");
         self.image_state = None;
         self.image_path = None;
     }
@@ -675,9 +692,12 @@ impl App {
                     if let Some(picker) = &mut self.picker {
                         let protocol = picker.new_resize_protocol(img_data);
                         self.image_state = Some(protocol);
+                    } else {
+                        eprintln!("[DEBUG REFRESH] Picker is None!");
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    eprintln!("[DEBUG REFRESH] Failed to extract image: {:?}", e);
                     // Image load failed, clear state
                     self.image_state = None;
                     self.image_path = None;
