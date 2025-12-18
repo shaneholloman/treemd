@@ -449,6 +449,8 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    let theme = &app.theme;
+
     // Account for borders and padding
     let inner = area.inner(ratatui::layout::Margin {
         vertical: 1,
@@ -459,6 +461,19 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
     let max_image_width = ((inner.width as usize * 80) / 100).max(20) as u16;
     // Max 12 lines per image to avoid covering too much text
     let max_image_height = 12u16;
+
+    // Get currently selected image if in interactive mode
+    let selected_image_id = if app.mode == crate::tui::app::AppMode::Interactive {
+        app.interactive_state.current_element().and_then(|elem| {
+            if matches!(elem.element_type, ElementType::Image { .. }) {
+                Some(elem.id)
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
 
     // Render all images that are visible in the current scroll viewport
     for elem in &app.interactive_state.elements {
@@ -505,7 +520,10 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
                         let protocol = picker.new_resize_protocol(img_data);
                         let resize = Resize::Scale(Some(FilterType::Triangle));
 
-                        // Get the actual size that the image will take
+                        // Check if this image is selected
+                        let is_selected = selected_image_id == Some(elem.id);
+
+                        // Calculate image area - add border space when selected
                         let image_area = Rect {
                             x: inner.x,
                             y: image_y,
@@ -513,9 +531,31 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
                             height: image_height,
                         };
 
+                        // If selected, render a selection border around the image
+                        let render_area = if is_selected {
+                            let border_style = Style::default()
+                                .fg(theme.selection_indicator_fg)
+                                .bg(theme.selection_indicator_bg)
+                                .add_modifier(Modifier::BOLD);
+
+                            let border = Block::default()
+                                .borders(Borders::ALL)
+                                .border_style(border_style)
+                                .title(" ▶ Selected ")
+                                .title_alignment(ratatui::layout::Alignment::Left);
+
+                            // Render border first
+                            frame.render_widget(border.clone(), image_area);
+
+                            // Return inner area for image (inside border)
+                            border.inner(image_area)
+                        } else {
+                            image_area
+                        };
+
                         let img_widget = StatefulImage::new().resize(resize);
                         let mut protocol_state = protocol;
-                        frame.render_stateful_widget(img_widget, image_area, &mut protocol_state);
+                        frame.render_stateful_widget(img_widget, render_area, &mut protocol_state);
                     }
                 }
             }
@@ -525,6 +565,7 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
     use ratatui_image::{StatefulImage, Resize, FilterType};
+    use std::time::Duration;
 
     if !app.is_image_modal_open() {
         return;
@@ -532,12 +573,22 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let theme = &app.theme;
 
-    // Recreate protocol each frame for proper resizing
-    if let Some(path) = app.viewing_image_path.clone() {
-        if let Ok(img_data) = crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
-            if let Some(picker) = &mut app.picker {
-                let protocol = picker.new_resize_protocol(img_data);
-                app.viewing_image_state = Some(protocol);
+    // Handle GIF frame animation (only if multiple frames exist)
+    if app.modal_gif_frames.len() > 1 {
+        if let Some(last_update) = app.modal_last_frame_update {
+            let current_frame = &app.modal_gif_frames[app.modal_frame_index];
+            let frame_delay = Duration::from_millis(current_frame.delay_ms as u64);
+
+            if last_update.elapsed() >= frame_delay {
+                // Advance to next frame (wraps around)
+                app.modal_frame_index = (app.modal_frame_index + 1) % app.modal_gif_frames.len();
+                app.modal_last_frame_update = Some(std::time::Instant::now());
+
+                // Update protocol with new frame image
+                if let Some(picker) = &mut app.picker {
+                    let next_frame_img = app.modal_gif_frames[app.modal_frame_index].image.clone();
+                    app.viewing_image_state = Some(picker.new_resize_protocol(next_frame_img));
+                }
             }
         }
     }
@@ -566,11 +617,23 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
         );
         frame.render_widget(bg, area);
 
+        // Build title with frame info for GIFs
+        let title = if app.modal_gif_frames.len() > 1 {
+            format!(
+                " GIF Animation ({}/{}) - Esc: Close ",
+                app.modal_frame_index + 1,
+                app.modal_gif_frames.len()
+            )
+        } else {
+            " Image (Esc: Close) ".to_string()
+        };
+
         // Render modal border with theme colors
         let modal_border = ratatui::widgets::Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.heading_1).add_modifier(Modifier::BOLD))
-            .title(" Image (Esc: Close) ")
+            .title(title)
+            .title_alignment(ratatui::layout::Alignment::Center)
             .style(Style::default().bg(theme.background).fg(theme.foreground));
         let inner_area = modal_border.inner(modal_area);
         frame.render_widget(modal_border, modal_area);

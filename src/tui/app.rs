@@ -413,6 +413,11 @@ pub struct App {
     // Image modal viewing state
     pub viewing_image_path: Option<std::path::PathBuf>,
     pub viewing_image_state: Option<ratatui_image::protocol::StatefulProtocol>,
+
+    // GIF animation state for modal
+    pub modal_gif_frames: Vec<crate::tui::image_cache::GifFrame>,
+    pub modal_frame_index: usize,
+    pub modal_last_frame_update: Option<Instant>,
 }
 
 /// Saved state for file navigation history
@@ -602,6 +607,11 @@ impl App {
             // Image modal viewing state
             viewing_image_path: None,
             viewing_image_state: None,
+
+            // GIF animation state for modal
+            modal_gif_frames: Vec::new(),
+            modal_frame_index: 0,
+            modal_last_frame_update: None,
         }
     }
 
@@ -715,11 +725,19 @@ impl App {
     pub fn open_image_modal(&mut self, image_src: &str) {
         // Try to resolve and load the image
         if let Ok(path) = self.resolve_image_path(image_src) {
-            if let Ok(img_data) = crate::tui::image_cache::ImageCache::extract_first_frame(&path) {
-                if let Some(picker) = &mut self.picker {
-                    let protocol = picker.new_resize_protocol(img_data);
-                    self.viewing_image_path = Some(path);
-                    self.viewing_image_state = Some(protocol);
+            // Load all frames (for GIF animation)
+            if let Ok(frames) = crate::tui::image_cache::ImageCache::extract_all_frames(&path) {
+                if !frames.is_empty() {
+                    // Set up initial frame
+                    let first_frame_img = frames[0].image.clone();
+                    if let Some(picker) = &mut self.picker {
+                        let protocol = picker.new_resize_protocol(first_frame_img);
+                        self.viewing_image_path = Some(path);
+                        self.viewing_image_state = Some(protocol);
+                        self.modal_gif_frames = frames;
+                        self.modal_frame_index = 0;
+                        self.modal_last_frame_update = Some(Instant::now());
+                    }
                 }
             }
         }
@@ -729,6 +747,9 @@ impl App {
     pub fn close_image_modal(&mut self) {
         self.viewing_image_path = None;
         self.viewing_image_state = None;
+        self.modal_gif_frames.clear();
+        self.modal_frame_index = 0;
+        self.modal_last_frame_update = None;
     }
 
     /// Check if image modal is open
