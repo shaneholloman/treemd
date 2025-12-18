@@ -567,13 +567,14 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
     use ratatui_image::{StatefulImage, Resize, FilterType};
     use std::time::Duration;
 
-    if !app.is_image_modal_open() {
+    if !app.is_image_modal_open() || app.modal_frame_protocols.is_empty() {
         return;
     }
 
     let theme = &app.theme;
 
     // Handle GIF frame animation (only if multiple frames exist)
+    // Just update the index - protocols are pre-created, no flicker!
     if app.modal_gif_frames.len() > 1 {
         if let Some(last_update) = app.modal_last_frame_update {
             let current_frame = &app.modal_gif_frames[app.modal_frame_index];
@@ -583,17 +584,12 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
                 // Advance to next frame (wraps around)
                 app.modal_frame_index = (app.modal_frame_index + 1) % app.modal_gif_frames.len();
                 app.modal_last_frame_update = Some(std::time::Instant::now());
-
-                // Update protocol with new frame image
-                if let Some(picker) = &mut app.picker {
-                    let next_frame_img = app.modal_gif_frames[app.modal_frame_index].image.clone();
-                    app.viewing_image_state = Some(picker.new_resize_protocol(next_frame_img));
-                }
             }
         }
     }
 
-    if let Some(protocol_state) = &mut app.viewing_image_state {
+    // Get the current frame's pre-created protocol
+    if app.modal_frame_index < app.modal_frame_protocols.len() {
         // Create modal area - centered on screen with some padding
         let modal_width = (area.width * 80) / 100;
         let modal_height = (area.height * 80) / 100;
@@ -638,8 +634,9 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
         let inner_area = modal_border.inner(modal_area);
         frame.render_widget(modal_border, modal_area);
 
-        // Render image centered in modal
+        // Render image centered in modal using pre-created protocol
         let resize = Resize::Scale(Some(FilterType::Triangle));
+        let protocol_state = &mut app.modal_frame_protocols[app.modal_frame_index];
         let image_size = protocol_state.size_for(resize.clone(), inner_area);
 
         let centered_area = Rect {

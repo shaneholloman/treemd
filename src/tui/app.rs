@@ -416,6 +416,7 @@ pub struct App {
 
     // GIF animation state for modal
     pub modal_gif_frames: Vec<crate::tui::image_cache::GifFrame>,
+    pub modal_frame_protocols: Vec<ratatui_image::protocol::StatefulProtocol>,
     pub modal_frame_index: usize,
     pub modal_last_frame_update: Option<Instant>,
 }
@@ -610,6 +611,7 @@ impl App {
 
             // GIF animation state for modal
             modal_gif_frames: Vec::new(),
+            modal_frame_protocols: Vec::new(),
             modal_frame_index: 0,
             modal_last_frame_update: None,
         }
@@ -728,13 +730,17 @@ impl App {
             // Load all frames (for GIF animation)
             if let Ok(frames) = crate::tui::image_cache::ImageCache::extract_all_frames(&path) {
                 if !frames.is_empty() {
-                    // Set up initial frame
-                    let first_frame_img = frames[0].image.clone();
                     if let Some(picker) = &mut self.picker {
-                        let protocol = picker.new_resize_protocol(first_frame_img);
+                        // Pre-create protocols for ALL frames to avoid flicker during animation
+                        let protocols: Vec<_> = frames
+                            .iter()
+                            .map(|f| picker.new_resize_protocol(f.image.clone()))
+                            .collect();
+
                         self.viewing_image_path = Some(path);
-                        self.viewing_image_state = Some(protocol);
+                        self.viewing_image_state = None; // Not used anymore, protocols are in vec
                         self.modal_gif_frames = frames;
+                        self.modal_frame_protocols = protocols;
                         self.modal_frame_index = 0;
                         self.modal_last_frame_update = Some(Instant::now());
                     }
@@ -748,6 +754,7 @@ impl App {
         self.viewing_image_path = None;
         self.viewing_image_state = None;
         self.modal_gif_frames.clear();
+        self.modal_frame_protocols.clear();
         self.modal_frame_index = 0;
         self.modal_last_frame_update = None;
     }
