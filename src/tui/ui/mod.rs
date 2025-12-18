@@ -573,8 +573,8 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let theme = &app.theme;
 
-    // Handle GIF frame animation (only if multiple frames exist)
-    if app.modal_gif_frames.len() > 1 {
+    // Handle GIF frame animation (only if multiple frames exist and not paused)
+    let frame_changed = if app.modal_gif_frames.len() > 1 && !app.modal_animation_paused {
         if let Some(last_update) = app.modal_last_frame_update {
             let current_frame = &app.modal_gif_frames[app.modal_frame_index];
             let frame_delay = Duration::from_millis(current_frame.delay_ms as u64);
@@ -583,12 +583,20 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
                 // Advance to next frame (wraps around)
                 app.modal_frame_index = (app.modal_frame_index + 1) % app.modal_gif_frames.len();
                 app.modal_last_frame_update = Some(std::time::Instant::now());
+                true
+            } else {
+                false
             }
+        } else {
+            false
         }
-    }
+    } else {
+        false
+    };
 
-    // Only update protocol when frame has changed (reduces flicker)
-    if app.modal_last_rendered_frame != Some(app.modal_frame_index) {
+    // Only update protocol when frame has changed
+    let needs_new_protocol = app.modal_last_rendered_frame != Some(app.modal_frame_index);
+    if needs_new_protocol {
         if let Some(picker) = &mut app.picker {
             let new_frame_img = app.modal_gif_frames[app.modal_frame_index].image.clone();
             app.viewing_image_state = Some(picker.new_resize_protocol(new_frame_img));
@@ -611,24 +619,30 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
             height: modal_height,
         };
 
-        // Render semi-dark background (using theme colors instead of pure black)
-        let bg = ratatui::widgets::Block::default().style(
-            Style::default()
-                .bg(theme.background)
-                .fg(theme.foreground)
-                .add_modifier(Modifier::DIM),
-        );
-        frame.render_widget(bg, area);
+        // Only render background/border when NOT in the middle of a frame change
+        // This reduces flicker during GIF animation
+        if !frame_changed {
+            // Render semi-dark background (using theme colors instead of pure black)
+            let bg = ratatui::widgets::Block::default().style(
+                Style::default()
+                    .bg(theme.background)
+                    .fg(theme.foreground)
+                    .add_modifier(Modifier::DIM),
+            );
+            frame.render_widget(bg, area);
+        }
 
-        // Build title with frame info for GIFs
+        // Build title with frame info and controls for GIFs
         let title = if app.modal_gif_frames.len() > 1 {
+            let state = if app.modal_animation_paused { "⏸" } else { "▶" };
             format!(
-                " GIF ({}/{}) - q/Esc: Close ",
+                " GIF {}/{} {} | ←/→:step Space:play/pause q:close ",
                 app.modal_frame_index + 1,
-                app.modal_gif_frames.len()
+                app.modal_gif_frames.len(),
+                state
             )
         } else {
-            " Image (q/Esc: Close) ".to_string()
+            " Image | q/Esc: Close ".to_string()
         };
 
         // Render modal border with theme colors

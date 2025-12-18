@@ -420,6 +420,7 @@ pub struct App {
     pub modal_frame_index: usize,
     pub modal_last_rendered_frame: Option<usize>,
     pub modal_last_frame_update: Option<Instant>,
+    pub modal_animation_paused: bool,
 }
 
 /// Saved state for file navigation history
@@ -616,6 +617,7 @@ impl App {
             modal_frame_index: 0,
             modal_last_rendered_frame: None,
             modal_last_frame_update: None,
+            modal_animation_paused: false,
         }
     }
 
@@ -758,6 +760,37 @@ impl App {
         self.modal_frame_index = 0;
         self.modal_last_rendered_frame = None;
         self.modal_last_frame_update = None;
+        self.modal_animation_paused = false;
+    }
+
+    /// Go to previous frame in GIF animation
+    pub fn modal_prev_frame(&mut self) {
+        if self.modal_gif_frames.is_empty() {
+            return;
+        }
+        // Pause animation when manually stepping
+        self.modal_animation_paused = true;
+        let len = self.modal_gif_frames.len();
+        self.modal_frame_index = (self.modal_frame_index + len - 1) % len;
+    }
+
+    /// Go to next frame in GIF animation
+    pub fn modal_next_frame(&mut self) {
+        if self.modal_gif_frames.is_empty() {
+            return;
+        }
+        // Pause animation when manually stepping
+        self.modal_animation_paused = true;
+        self.modal_frame_index = (self.modal_frame_index + 1) % self.modal_gif_frames.len();
+    }
+
+    /// Toggle animation play/pause
+    pub fn modal_toggle_animation(&mut self) {
+        self.modal_animation_paused = !self.modal_animation_paused;
+        if !self.modal_animation_paused {
+            // Reset the timer when resuming
+            self.modal_last_frame_update = Some(Instant::now());
+        }
     }
 
     /// Check if image modal is open

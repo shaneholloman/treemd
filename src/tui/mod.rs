@@ -171,12 +171,22 @@ pub fn run(terminal: &mut DefaultTerminal, app: App) -> Result<()> {
 
         if let Event::Key(key) = tty::read_event()? {
             if key.kind == KeyEventKind::Press {
-                // When image modal is open, allow Escape or 'q' to close it
-                // All other keys are blocked to prevent manipulating content behind modal
+                // When image modal is open, handle modal-specific keys
                 if app.is_image_modal_open() {
                     match key.code {
                         KeyCode::Esc | KeyCode::Char('q') => {
                             app.close_image_modal();
+                        }
+                        // Manual frame stepping for GIFs
+                        KeyCode::Left | KeyCode::Char('h') => {
+                            app.modal_prev_frame();
+                        }
+                        KeyCode::Right | KeyCode::Char('l') => {
+                            app.modal_next_frame();
+                        }
+                        // Toggle play/pause for GIF animation
+                        KeyCode::Char(' ') => {
+                            app.modal_toggle_animation();
                         }
                         _ => {}
                     }
