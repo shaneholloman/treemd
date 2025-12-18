@@ -334,7 +334,7 @@ impl InteractiveState {
                     }
                 }
                 Block::Paragraph { inline, .. } => {
-                    // Extract links from inline elements (track index for selection highlighting)
+                    // Extract links and images from inline elements
                     for (inline_idx, inline_elem) in inline.iter().enumerate() {
                         if let InlineElement::Link { text, url, .. } = inline_elem {
                             let id = ElementId {
@@ -376,6 +376,21 @@ impl InteractiveState {
                                 element_type: ElementType::Link {
                                     link: Link::new(text.clone(), target, 0),
                                     line_idx: current_line,
+                                },
+                                line_range: (current_line, current_line + 1),
+                            });
+                        } else if let InlineElement::Image { alt, src, .. } = inline_elem {
+                            let id = ElementId {
+                                block_idx,
+                                sub_idx: Some(inline_idx),
+                            };
+
+                            self.elements.push(InteractiveElement {
+                                id,
+                                element_type: ElementType::Image {
+                                    alt: alt.clone(),
+                                    src: src.clone(),
+                                    block_idx,
                                 },
                                 line_range: (current_line, current_line + 1),
                             });
