@@ -567,14 +567,13 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
     use ratatui_image::{StatefulImage, Resize, FilterType};
     use std::time::Duration;
 
-    if !app.is_image_modal_open() || app.modal_frame_protocols.is_empty() {
+    if !app.is_image_modal_open() || app.modal_gif_frames.is_empty() {
         return;
     }
 
     let theme = &app.theme;
 
     // Handle GIF frame animation (only if multiple frames exist)
-    // Just update the index - protocols are pre-created, no flicker!
     if app.modal_gif_frames.len() > 1 {
         if let Some(last_update) = app.modal_last_frame_update {
             let current_frame = &app.modal_gif_frames[app.modal_frame_index];
@@ -588,8 +587,17 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    // Get the current frame's pre-created protocol
-    if app.modal_frame_index < app.modal_frame_protocols.len() {
+    // Only update protocol when frame has changed (reduces flicker)
+    if app.modal_last_rendered_frame != Some(app.modal_frame_index) {
+        if let Some(picker) = &mut app.picker {
+            let new_frame_img = app.modal_gif_frames[app.modal_frame_index].image.clone();
+            app.viewing_image_state = Some(picker.new_resize_protocol(new_frame_img));
+            app.modal_last_rendered_frame = Some(app.modal_frame_index);
+        }
+    }
+
+    // Render using the single protocol
+    if let Some(protocol_state) = &mut app.viewing_image_state {
         // Create modal area - centered on screen with some padding
         let modal_width = (area.width * 80) / 100;
         let modal_height = (area.height * 80) / 100;
@@ -604,7 +612,6 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
         };
 
         // Render semi-dark background (using theme colors instead of pure black)
-        // This preserves visibility of content behind the modal
         let bg = ratatui::widgets::Block::default().style(
             Style::default()
                 .bg(theme.background)
@@ -616,12 +623,12 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
         // Build title with frame info for GIFs
         let title = if app.modal_gif_frames.len() > 1 {
             format!(
-                " GIF Animation ({}/{}) - Esc: Close ",
+                " GIF ({}/{}) - q/Esc: Close ",
                 app.modal_frame_index + 1,
                 app.modal_gif_frames.len()
             )
         } else {
-            " Image (Esc: Close) ".to_string()
+            " Image (q/Esc: Close) ".to_string()
         };
 
         // Render modal border with theme colors
@@ -634,9 +641,8 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
         let inner_area = modal_border.inner(modal_area);
         frame.render_widget(modal_border, modal_area);
 
-        // Render image centered in modal using pre-created protocol
+        // Render image centered in modal
         let resize = Resize::Scale(Some(FilterType::Triangle));
-        let protocol_state = &mut app.modal_frame_protocols[app.modal_frame_index];
         let image_size = protocol_state.size_for(resize.clone(), inner_area);
 
         let centered_area = Rect {
