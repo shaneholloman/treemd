@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-01-02
+
+### Added
+
+- **Inline image rendering** - Full image support with Kitty graphics protocol ([#40](https://github.com/Epistates/treemd/issues/40))
+  - Images render inline with markdown content using ratatui-image
+  - Supports PNG, JPEG, GIF, WebP and other common formats
+  - Image modal view - press Enter on an image in interactive mode for full-screen view
+  - Press `q` to close image modal
+  - Automatic image caching and lazy loading for performance
+  - Works in Kitty, iTerm2, WezTerm, and other terminals with image protocol support
+  - Fallback to halfblock Unicode rendering on unsupported terminals
+
+- **GIF animation support** - Animated GIFs with playback controls
+  - GIFs animate automatically in image modal view
+  - Press `Space` to play/pause animation
+  - Press `n` for next frame, `p` for previous frame (manual stepping)
+  - First frame extraction with proper transparency handling
+  - Software rendering mode for flicker-free animation
+
+- **File picker on startup** - Interactive file picker when no file is specified
+  - Fuzzy search through markdown files in current directory
+  - Navigate with `j`/`k` or arrow keys
+  - Press `Enter` to open selected file
+  - Shows file list with real-time filtering
+
+- **macOS XDG config path support** - `~/.config/treemd` now supported on macOS ([#41](https://github.com/Epistates/treemd/issues/41))
+  - Checks `~/.config/treemd/config.toml` first on macOS
+  - Falls back to `~/Library/Application Support/treemd/config.toml`
+  - Enables easier dotfiles management and cross-platform config sharing
+
+- **Alpine Linux support** - musl builds for Alpine and other musl-based distributions ([#42](https://github.com/Epistates/treemd/issues/42))
+  - Added `x86_64-unknown-linux-musl` binary to releases
+  - Added `aarch64-unknown-linux-musl` binary to releases
+  - Statically-linked binaries work without glibc dependency
+
+### Fixed
+
+- **GIF animation flicker** - Eliminated flicker by pre-creating protocols and optimizing background clearing
+- **Image rendering in normal mode** - Images now render correctly outside of interactive mode
+- **Inline images in paragraphs** - Fixed detection of images within paragraph text
+- **Theme preservation** - Theme colors maintained correctly during image rendering
+
+### Technical
+
+- **New modules**
+  - `src/tui/kitty_animation.rs` - GIF animation state machine and frame management
+  - `src/tui/image_cache.rs` - Image caching and lazy loading system
+
+- **Dependencies**
+  - Added `ratatui-image 10` for terminal image rendering
+  - Added `image 0.25` for image processing
+  - Added `gif 0.13` for GIF parsing and frame extraction
+
+- **Release workflow**
+  - Added musl targets (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`) to CI
+
 ## [0.5.4] - 2025-12-15
 
 ### Added
