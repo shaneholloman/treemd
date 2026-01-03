@@ -765,11 +765,7 @@ impl App {
     /// Close the image modal
     pub fn close_image_modal(&mut self) {
         // Delete Kitty animation if active
-        if let Some(ref anim) = self.kitty_animation {
-            let mut stdout = std::io::stdout();
-            let _ = kitty_animation::delete_animation(&mut stdout, anim);
-        }
-        self.kitty_animation = None;
+        self.stop_kitty_animation();
 
         self.viewing_image_path = None;
         self.viewing_image_state = None;
@@ -786,10 +782,14 @@ impl App {
         if self.modal_gif_frames.is_empty() {
             return;
         }
+        // Stop Kitty animation - it doesn't support frame stepping, so fall back to software
+        self.stop_kitty_animation();
         // Pause animation when manually stepping
         self.modal_animation_paused = true;
         let len = self.modal_gif_frames.len();
         self.modal_frame_index = (self.modal_frame_index + len - 1) % len;
+        // Force re-render of the new frame
+        self.modal_last_rendered_frame = None;
     }
 
     /// Go to next frame in GIF animation
@@ -797,9 +797,23 @@ impl App {
         if self.modal_gif_frames.is_empty() {
             return;
         }
+        // Stop Kitty animation - it doesn't support frame stepping, so fall back to software
+        self.stop_kitty_animation();
         // Pause animation when manually stepping
         self.modal_animation_paused = true;
         self.modal_frame_index = (self.modal_frame_index + 1) % self.modal_gif_frames.len();
+        // Force re-render of the new frame
+        self.modal_last_rendered_frame = None;
+    }
+
+    /// Stop and delete Kitty animation, falling back to software rendering.
+    /// Called when manual frame control is needed (stepping).
+    fn stop_kitty_animation(&mut self) {
+        if let Some(ref anim) = self.kitty_animation {
+            let mut stdout = std::io::stdout();
+            let _ = kitty_animation::delete_animation(&mut stdout, anim);
+        }
+        self.kitty_animation = None;
     }
 
     /// Toggle animation play/pause

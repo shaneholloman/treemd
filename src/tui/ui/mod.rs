@@ -17,7 +17,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap,
+    Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap,
 };
 use table::render_table;
 use util::detect_checkbox_in_text;
@@ -602,7 +602,14 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Try to start Kitty native animation for multi-frame GIFs.
     // Kitty handles frame timing internally - no flicker!
-    if is_multi_frame && !app.has_kitty_animation() && app.use_kitty_animation {
+    // Only start when animation is playing (not paused) - this allows:
+    // 1. Manual frame stepping to work via software rendering
+    // 2. Kitty animation to restart when user resumes playback
+    if is_multi_frame
+        && !app.has_kitty_animation()
+        && app.use_kitty_animation
+        && !app.modal_animation_paused
+    {
         // Start animation at center of inner area
         let image_col = inner_area.x + inner_area.width / 4;
         let image_row = inner_area.y + inner_area.height / 4;
@@ -614,6 +621,10 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // For software animation (non-Kitty terminals), handle frame timing
     let is_animating = is_multi_frame && !app.modal_animation_paused && !kitty_animating;
+
+    // When animating (software or Kitty), avoid overwriting the image area
+    let avoid_image_area = is_animating || kitty_animating;
+
     if is_animating {
         if let Some(last_update) = app.modal_last_frame_update {
             let current_frame = &app.modal_gif_frames[app.modal_frame_index];
@@ -652,55 +663,121 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
             height: image_size.height,
         };
 
-        // Render background ONLY to areas outside the image to prevent flicker.
-        // During animation, we avoid overwriting the image area entirely.
+        // Clear and render background to hide underlying UI (sidebars, etc.)
+        // During animation, we avoid overwriting the image area to prevent flicker.
         let bg_style = Style::default()
             .bg(theme_background)
             .fg(theme_foreground)
             .add_modifier(Modifier::DIM);
 
-        // Render background in 4 regions around the modal (L-shaped areas)
-        // Top strip (above modal)
-        if modal_area.y > area.y {
-            let top_bg = Rect {
-                x: area.x,
-                y: area.y,
-                width: area.width,
-                height: modal_area.y - area.y,
-            };
-            frame.render_widget(ratatui::widgets::Block::default().style(bg_style), top_bg);
-        }
-        // Bottom strip (below modal)
-        let modal_bottom = modal_area.y + modal_area.height;
-        if modal_bottom < area.y + area.height {
-            let bottom_bg = Rect {
-                x: area.x,
-                y: modal_bottom,
-                width: area.width,
-                height: (area.y + area.height) - modal_bottom,
-            };
-            frame.render_widget(ratatui::widgets::Block::default().style(bg_style), bottom_bg);
-        }
-        // Left strip (left of modal, between top and bottom)
-        if modal_area.x > area.x {
-            let left_bg = Rect {
-                x: area.x,
-                y: modal_area.y,
-                width: modal_area.x - area.x,
-                height: modal_area.height,
-            };
-            frame.render_widget(ratatui::widgets::Block::default().style(bg_style), left_bg);
-        }
-        // Right strip (right of modal, between top and bottom)
-        let modal_right = modal_area.x + modal_area.width;
-        if modal_right < area.x + area.width {
-            let right_bg = Rect {
-                x: modal_right,
-                y: modal_area.y,
-                width: (area.x + area.width) - modal_right,
-                height: modal_area.height,
-            };
-            frame.render_widget(ratatui::widgets::Block::default().style(bg_style), right_bg);
+        // For non-animating state, just clear and fill the entire screen
+        if !avoid_image_area {
+            // Clear the entire screen first to hide sidebars
+            frame.render_widget(Clear, area);
+            frame.render_widget(Block::default().style(bg_style), area);
+        } else {
+            // During animation, clear all regions EXCEPT the image area to avoid flicker
+            // This includes: outer background + modal interior padding around image
+
+            // 1. Outer background - 4 strips around the modal
+            // Top strip (above modal) - full width
+            if modal_area.y > area.y {
+                let top_bg = Rect {
+                    x: area.x,
+                    y: area.y,
+                    width: area.width,
+                    height: modal_area.y - area.y,
+                };
+                frame.render_widget(Clear, top_bg);
+                frame.render_widget(Block::default().style(bg_style), top_bg);
+            }
+            // Bottom strip (below modal) - full width
+            let modal_bottom = modal_area.y + modal_area.height;
+            if modal_bottom < area.y + area.height {
+                let bottom_bg = Rect {
+                    x: area.x,
+                    y: modal_bottom,
+                    width: area.width,
+                    height: (area.y + area.height) - modal_bottom,
+                };
+                frame.render_widget(Clear, bottom_bg);
+                frame.render_widget(Block::default().style(bg_style), bottom_bg);
+            }
+            // Left strip (left of modal, modal height only)
+            if modal_area.x > area.x {
+                let left_bg = Rect {
+                    x: area.x,
+                    y: modal_area.y,
+                    width: modal_area.x - area.x,
+                    height: modal_area.height,
+                };
+                frame.render_widget(Clear, left_bg);
+                frame.render_widget(Block::default().style(bg_style), left_bg);
+            }
+            // Right strip (right of modal, modal height only)
+            let modal_right = modal_area.x + modal_area.width;
+            if modal_right < area.x + area.width {
+                let right_bg = Rect {
+                    x: modal_right,
+                    y: modal_area.y,
+                    width: (area.x + area.width) - modal_right,
+                    height: modal_area.height,
+                };
+                frame.render_widget(Clear, right_bg);
+                frame.render_widget(Block::default().style(bg_style), right_bg);
+            }
+
+            // 2. Modal interior padding - 4 strips between modal border and image
+            let modal_bg = Style::default().bg(theme_background).fg(theme_foreground);
+
+            // Top padding (between modal top border and image top)
+            if image_area.y > inner_area.y {
+                let top_pad = Rect {
+                    x: inner_area.x,
+                    y: inner_area.y,
+                    width: inner_area.width,
+                    height: image_area.y - inner_area.y,
+                };
+                frame.render_widget(Clear, top_pad);
+                frame.render_widget(Block::default().style(modal_bg), top_pad);
+            }
+            // Bottom padding (between image bottom and modal bottom border)
+            let image_bottom = image_area.y + image_area.height;
+            let inner_bottom = inner_area.y + inner_area.height;
+            if image_bottom < inner_bottom {
+                let bottom_pad = Rect {
+                    x: inner_area.x,
+                    y: image_bottom,
+                    width: inner_area.width,
+                    height: inner_bottom - image_bottom,
+                };
+                frame.render_widget(Clear, bottom_pad);
+                frame.render_widget(Block::default().style(modal_bg), bottom_pad);
+            }
+            // Left padding (between modal left border and image left, image height only)
+            if image_area.x > inner_area.x {
+                let left_pad = Rect {
+                    x: inner_area.x,
+                    y: image_area.y,
+                    width: image_area.x - inner_area.x,
+                    height: image_area.height,
+                };
+                frame.render_widget(Clear, left_pad);
+                frame.render_widget(Block::default().style(modal_bg), left_pad);
+            }
+            // Right padding (between image right and modal right border, image height only)
+            let image_right = image_area.x + image_area.width;
+            let inner_right = inner_area.x + inner_area.width;
+            if image_right < inner_right {
+                let right_pad = Rect {
+                    x: image_right,
+                    y: image_area.y,
+                    width: inner_right - image_right,
+                    height: image_area.height,
+                };
+                frame.render_widget(Clear, right_pad);
+                frame.render_widget(Block::default().style(modal_bg), right_pad);
+            }
         }
 
         // Build title with frame info and controls for GIFs
@@ -726,10 +803,6 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
             .title(title)
             .title_alignment(ratatui::layout::Alignment::Center)
             .style(Style::default().bg(theme_background).fg(theme_foreground));
-
-        // When Kitty handles animation, avoid overwriting the image area.
-        // The terminal manages the animation layer directly.
-        let avoid_image_area = is_animating || kitty_animating;
 
         // Only render the border frame (not the interior) during animation
         // to avoid overwriting the previous image before new one is drawn
