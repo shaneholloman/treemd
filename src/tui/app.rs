@@ -339,15 +339,15 @@ pub struct App {
     pub link_search_active: bool,   // Whether search input is active
 
     // File picker state
-    pub files_in_directory: Vec<PathBuf>,     // All .md files in cwd
-    pub filtered_file_indices: Vec<usize>,    // Indices after filtering
-    pub selected_file_idx: Option<usize>,     // Selected index in filtered list
-    pub file_search_query: String,            // Search query for filtering files
-    pub file_search_active: bool,             // Whether search input is active
-    pub startup_needs_file_picker: bool,      // True if started without file arg
+    pub files_in_directory: Vec<PathBuf>, // All .md files in cwd
+    pub filtered_file_indices: Vec<usize>, // Indices after filtering
+    pub selected_file_idx: Option<usize>, // Selected index in filtered list
+    pub file_search_query: String,        // Search query for filtering files
+    pub file_search_active: bool,         // Whether search input is active
+    pub startup_needs_file_picker: bool,  // True if started without file arg
 
-    pub file_history: Vec<FileState>, // Back navigation stack
-    pub file_future: Vec<FileState>, // Forward navigation stack (for undo back)
+    pub file_history: Vec<FileState>,   // Back navigation stack
+    pub file_future: Vec<FileState>,    // Forward navigation stack (for undo back)
     pub status_message: Option<String>, // Temporary status message to display
     pub status_message_time: Option<Instant>, // When the status message was set
 
@@ -660,8 +660,8 @@ impl App {
     /// Finds the first image in the document content, extracts its first frame
     /// (for GIFs), and creates a stateful protocol for rendering.
     pub fn load_first_image(&mut self, content: &str) {
-        use crate::parser::output::Block as ContentBlock;
         use crate::parser::content::parse_content;
+        use crate::parser::output::Block as ContentBlock;
 
         // Parse content to find first image
         let blocks = parse_content(content, 0);
@@ -1101,32 +1101,28 @@ impl App {
             // === Link Navigation ===
             NextLink => self.next_link(),
             PreviousLink => self.previous_link(),
-            FollowLink => {
-                match self.mode {
-                    AppMode::LinkFollow => {
-                        if let Err(e) = self.follow_selected_link() {
-                            self.status_message = Some(format!("✗ Error: {}", e));
-                        }
-                        self.update_content_metrics();
+            FollowLink => match self.mode {
+                AppMode::LinkFollow => {
+                    if let Err(e) = self.follow_selected_link() {
+                        self.status_message = Some(format!("✗ Error: {}", e));
                     }
-                    AppMode::FilePicker | AppMode::FileSearch => {
-                        if let Err(e) = self.select_file_from_picker() {
-                            self.status_message = Some(format!("✗ Error: {}", e));
-                        }
-                        self.update_content_metrics();
-                    }
-                    _ => {}
+                    self.update_content_metrics();
                 }
-            }
-            LinkSearch => {
-                match self.mode {
-                    AppMode::LinkFollow => self.start_link_search(),
-                    AppMode::FilePicker => {
-                        self.file_search_active = true;
+                AppMode::FilePicker | AppMode::FileSearch => {
+                    if let Err(e) = self.select_file_from_picker() {
+                        self.status_message = Some(format!("✗ Error: {}", e));
                     }
-                    _ => {}
+                    self.update_content_metrics();
                 }
-            }
+                _ => {}
+            },
+            LinkSearch => match self.mode {
+                AppMode::LinkFollow => self.start_link_search(),
+                AppMode::FilePicker => {
+                    self.file_search_active = true;
+                }
+                _ => {}
+            },
 
             // === Interactive Mode ===
             InteractiveNext => {
@@ -3468,7 +3464,8 @@ impl App {
             .map(|entry| entry.path())
             .filter(|path| {
                 path.is_file()
-                    && path.extension()
+                    && path
+                        .extension()
                         .and_then(|ext| ext.to_str())
                         .map(|ext| ext == "md" || ext == "markdown")
                         .unwrap_or(false)
@@ -3531,7 +3528,11 @@ impl App {
         self.scan_markdown_files();
 
         // Highlight current file if present
-        if let Some(current_idx) = self.files_in_directory.iter().position(|p| p == &self.current_file_path) {
+        if let Some(current_idx) = self
+            .files_in_directory
+            .iter()
+            .position(|p| p == &self.current_file_path)
+        {
             self.selected_file_idx = Some(current_idx);
         } else if !self.filtered_file_indices.is_empty() {
             self.selected_file_idx = Some(0);

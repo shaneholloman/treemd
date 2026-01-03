@@ -336,7 +336,8 @@ fn handle_text_input(
 
     // File search input mode (FilePicker with file_search_active flag)
     if (app.mode == app::AppMode::FilePicker && app.file_search_active)
-        || app.mode == app::AppMode::FileSearch {
+        || app.mode == app::AppMode::FileSearch
+    {
         if let KeyCode::Char(c) = code {
             app.file_search_push(c);
             return true;

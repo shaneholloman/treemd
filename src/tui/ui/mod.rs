@@ -441,8 +441,8 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
-    use ratatui_image::{StatefulImage, Resize, FilterType};
     use crate::tui::interactive::ElementType;
+    use ratatui_image::{FilterType, Resize, StatefulImage};
 
     // Don't render inline when viewing modal
     if app.viewing_image_path.is_some() {
@@ -477,7 +477,10 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Render all images that are visible in the current scroll viewport
     for elem in &app.interactive_state.elements {
-        if let ElementType::Image { src, block_idx: _, .. } = &elem.element_type {
+        if let ElementType::Image {
+            src, block_idx: _, ..
+        } = &elem.element_type
+        {
             let (line_start, line_end) = elem.line_range;
 
             // Check if this image is visible in current scroll window
@@ -515,7 +518,9 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
             // Resolve image path
             if let Ok(image_path) = app.resolve_image_path(src) {
                 // Load and render the image
-                if let Ok(img_data) = crate::tui::image_cache::ImageCache::extract_first_frame(&image_path) {
+                if let Ok(img_data) =
+                    crate::tui::image_cache::ImageCache::extract_first_frame(&image_path)
+                {
                     if let Some(picker) = &mut app.picker {
                         let protocol = picker.new_resize_protocol(img_data);
                         let resize = Resize::Scale(Some(FilterType::Triangle));
@@ -564,7 +569,7 @@ fn render_inline_images(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
-    use ratatui_image::{StatefulImage, Resize, FilterType};
+    use ratatui_image::{FilterType, Resize, StatefulImage};
     use std::time::Duration;
 
     // Must have frames available
@@ -782,7 +787,11 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
 
         // Build title with frame info and controls for GIFs
         let title = if is_multi_frame {
-            let state = if app.modal_animation_paused { "⏸" } else { "▶" };
+            let state = if app.modal_animation_paused {
+                "⏸"
+            } else {
+                "▶"
+            };
             // Show Kitty indicator when using native animation
             let mode = if kitty_animating { "Kitty" } else { "GIF" };
             format!(
@@ -799,7 +808,11 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
         // Render modal border (but NOT over image area during animation)
         let modal_border = ratatui::widgets::Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme_heading_1).add_modifier(Modifier::BOLD))
+            .border_style(
+                Style::default()
+                    .fg(theme_heading_1)
+                    .add_modifier(Modifier::BOLD),
+            )
             .title(title)
             .title_alignment(ratatui::layout::Alignment::Center)
             .style(Style::default().bg(theme_background).fg(theme_foreground));
@@ -826,7 +839,12 @@ fn render_image_modal(frame: &mut Frame, app: &mut App, area: Rect) {
 /// Render only the border portions of a block, avoiding the image area.
 /// This prevents flickering during GIF animation by not overwriting
 /// the previous frame before the new one is drawn.
-fn render_border_only(frame: &mut Frame, block: &ratatui::widgets::Block, modal_area: Rect, image_area: Rect) {
+fn render_border_only(
+    frame: &mut Frame,
+    block: &ratatui::widgets::Block,
+    modal_area: Rect,
+    image_area: Rect,
+) {
     use ratatui::widgets::Widget;
 
     // Top border row (full width of modal)
@@ -1302,7 +1320,9 @@ fn render_markdown_enhanced(
 
                 // If paragraph contains images, add blank lines to reserve space for them
                 // Images will be rendered on top at this position, so we need to push text below down
-                let has_images = inline.iter().any(|elem| matches!(elem, InlineElement::Image { .. }));
+                let has_images = inline
+                    .iter()
+                    .any(|elem| matches!(elem, InlineElement::Image { .. }));
                 if has_images {
                     // Reserve space for image (max 12 lines + 1 blank line separator)
                     for _ in 0..13 {

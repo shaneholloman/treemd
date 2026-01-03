@@ -3,11 +3,11 @@
 //! Provides helper functions for loading and processing images, particularly
 //! extracting the first frame from GIF files for rendering.
 
-use std::path::Path;
 use std::io::BufReader;
+use std::path::Path;
 
-use image::RgbaImage;
 use image::Rgba;
+use image::RgbaImage;
 
 /// Errors that can occur during image loading and caching
 #[derive(Debug, Clone)]
@@ -54,12 +54,7 @@ impl ImageCache {
     }
 
     /// Composite a GIF frame onto a canvas, handling transparency
-    fn composite_gif_frame(
-        canvas: &mut RgbaImage,
-        frame: &gif::Frame,
-        width: u32,
-        height: u32,
-    ) {
+    fn composite_gif_frame(canvas: &mut RgbaImage, frame: &gif::Frame, width: u32, height: u32) {
         let frame_buffer = &frame.buffer;
         let frame_width = frame.width as u32;
         let frame_height = frame.height as u32;
@@ -138,7 +133,12 @@ impl ImageCache {
         image::ImageReader::open(path)
             .ok()
             .and_then(|r| r.decode().ok())
-            .map(|img| vec![GifFrame { image: img, delay_ms: 0 }])
+            .map(|img| {
+                vec![GifFrame {
+                    image: img,
+                    delay_ms: 0,
+                }]
+            })
             .ok_or_else(|| ImageError::InvalidFormat("Unsupported image format".to_string()))
     }
 

@@ -94,7 +94,8 @@ fn main() -> Result<()> {
                 .filter(|entry| {
                     let path = entry.path();
                     path.is_file()
-                        && path.extension()
+                        && path
+                            .extension()
                             .and_then(|ext| ext.to_str())
                             .map(|ext| ext == "md" || ext == "markdown")
                             .unwrap_or(false)
@@ -113,7 +114,12 @@ fn main() -> Result<()> {
             }
 
             // Create dummy document to show file picker
-            (treemd::input::InputSource::Stdin("# Select a file\n\nPress Enter to select a markdown file.".to_string()), true)
+            (
+                treemd::input::InputSource::Stdin(
+                    "# Select a file\n\nPress Enter to select a markdown file.".to_string(),
+                ),
+                true,
+            )
         }
         Some(file_path) => {
             // File path was provided - use existing logic
@@ -124,7 +130,9 @@ fn main() -> Result<()> {
                     eprintln!("\nUsage: treemd [OPTIONS] <FILE>");
                     eprintln!("       treemd [OPTIONS] -");
                     eprintln!("       tree | treemd [OPTIONS]\n");
-                    eprintln!("Use '-' to explicitly read from stdin, or pipe input with CLI flags.");
+                    eprintln!(
+                        "Use '-' to explicitly read from stdin, or pipe input with CLI flags."
+                    );
                     eprintln!("\nFor shell completion setup, use:");
                     eprintln!("  treemd --setup-completions");
                     std::process::exit(1);

@@ -964,10 +964,7 @@ pub fn render_file_picker(frame: &mut Frame, app: &App, area: Rect) {
             .style(Style::default().bg(theme.modal_bg())),
     );
 
-    frame.render_widget(
-        paragraph.scroll((scroll_offset, 0)),
-        popup_area,
-    );
+    frame.render_widget(paragraph.scroll((scroll_offset, 0)), popup_area);
 
     // Scrollbar if needed
     if total_lines > inner_height {

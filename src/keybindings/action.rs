@@ -372,7 +372,11 @@ impl Action {
 
             Action::CopyContent | Action::CopyAnchor => "Clipboard",
 
-            Action::GoBack | Action::GoForward | Action::OpenInEditor | Action::UndoEdit | Action::OpenFilePicker => "Files",
+            Action::GoBack
+            | Action::GoForward
+            | Action::OpenInEditor
+            | Action::UndoEdit
+            | Action::OpenFilePicker => "Files",
 
             Action::ConfirmAction
             | Action::CancelAction

@@ -47,7 +47,6 @@ pub fn is_kitty_terminal() -> bool {
     std::env::var("KITTY_WINDOW_ID").is_ok()
 }
 
-
 /// Simple base64 encoding
 fn base64_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -84,7 +83,11 @@ fn image_to_rgba(img: &DynamicImage) -> Vec<u8> {
 }
 
 /// Send a Kitty graphics protocol command
-fn send_kitty_command<W: Write>(writer: &mut W, params: &str, payload: Option<&str>) -> io::Result<()> {
+fn send_kitty_command<W: Write>(
+    writer: &mut W,
+    params: &str,
+    payload: Option<&str>,
+) -> io::Result<()> {
     write!(writer, "\x1b_G{}", params)?;
     if let Some(data) = payload {
         write!(writer, ";{}", data)?;
