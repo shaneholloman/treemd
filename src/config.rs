@@ -23,6 +23,10 @@ pub struct Config {
     /// Editor configuration for external file editing
     #[serde(default)]
     pub editor: EditorConfig,
+
+    /// Image display configuration
+    #[serde(default)]
+    pub images: ImageConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +45,27 @@ pub struct TerminalConfig {
 
     #[serde(default)]
     pub warned_terminal_app: bool,
+}
+
+/// Image display configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageConfig {
+    /// Whether to render images in the TUI (default: true)
+    /// When disabled, images are skipped entirely
+    #[serde(default = "default_images_enabled")]
+    pub enabled: bool,
+}
+
+impl Default for ImageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_images_enabled(),
+        }
+    }
+}
+
+fn default_images_enabled() -> bool {
+    true
 }
 
 /// Custom theme color overrides

@@ -257,7 +257,18 @@ fn main() -> Result<()> {
             ("stdin".to_string(), std::path::PathBuf::from("<stdin>"))
         };
 
-        let mut app = treemd::App::new(doc, filename, file_path, config, color_mode);
+        // Determine if images are enabled
+        // Priority: CLI flags > config file > default (true)
+        let images_enabled = if args.no_images {
+            false
+        } else if args.images {
+            true
+        } else {
+            config.images.enabled
+        };
+
+        let mut app =
+            treemd::App::new(doc, filename, file_path, config, color_mode, images_enabled);
         if needs_file_picker {
             app.startup_needs_file_picker = true;
         }

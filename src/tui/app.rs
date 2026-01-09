@@ -426,6 +426,9 @@ pub struct App {
     // Native Kitty animation (for flicker-free GIF playback)
     pub kitty_animation: Option<KittyAnimation>,
     pub use_kitty_animation: bool, // Whether to use native Kitty animation
+
+    // Image rendering control (can be disabled via config or CLI)
+    pub images_enabled: bool,
 }
 
 /// Saved state for file navigation history
@@ -454,6 +457,7 @@ impl App {
         file_path: PathBuf,
         config: Config,
         color_mode: ColorMode,
+        images_enabled: bool,
     ) -> Self {
         let tree = document.build_tree();
         let collapsed_headings = HashSet::new();
@@ -606,7 +610,12 @@ impl App {
             image_cache: ImageCache::new(),
 
             // Terminal graphics protocol picker with fallback (like figif)
-            picker: Self::init_picker(),
+            // Only initialize if images are enabled
+            picker: if images_enabled {
+                Self::init_picker()
+            } else {
+                None
+            },
 
             // First image in document for rendering (stateful for resizing)
             image_state: None,
@@ -626,7 +635,10 @@ impl App {
 
             // Native Kitty animation
             kitty_animation: None,
-            use_kitty_animation: kitty_animation::is_kitty_terminal(),
+            use_kitty_animation: images_enabled && kitty_animation::is_kitty_terminal(),
+
+            // Image rendering control
+            images_enabled,
         }
     }
 
@@ -738,6 +750,11 @@ impl App {
 
     /// Open image modal for a given image path
     pub fn open_image_modal(&mut self, image_src: &str) {
+        // Skip if images are disabled
+        if !self.images_enabled {
+            return;
+        }
+
         // Try to resolve and load the image
         if let Ok(path) = self.resolve_image_path(image_src) {
             // Load all frames (for GIF animation)
@@ -4274,9 +4291,14 @@ impl App {
                 Ok(())
             }
             ElementType::Image { src, alt, .. } => {
-                // Open image modal to view the image fullscreen
-                self.open_image_modal(src);
-                self.status_message = Some(format!("📸 Viewing: {} (Esc:Close)", alt));
+                if self.images_enabled {
+                    // Open image modal to view the image fullscreen
+                    self.open_image_modal(src);
+                    self.status_message = Some(format!("📸 Viewing: {} (Esc:Close)", alt));
+                } else {
+                    self.status_message =
+                        Some("Images disabled (use --images or config to enable)".to_string());
+                }
                 Ok(())
             }
             ElementType::Table { rows, cols, .. } => {

@@ -121,6 +121,22 @@ pub struct Cli {
     #[arg(long = "color-mode", value_name = "MODE")]
     pub color_mode: Option<ColorModeArg>,
 
+    /// Disable image rendering in TUI mode
+    ///
+    /// Skip all image loading and display. Useful for terminals that don't
+    /// support graphics protocols or if you prefer text-only rendering.
+    /// This overrides the config file setting.
+    #[arg(long = "no-images")]
+    pub no_images: bool,
+
+    /// Enable image rendering in TUI mode (override config)
+    ///
+    /// Force image rendering even if disabled in config.toml.
+    /// Images will be displayed using the best available terminal graphics
+    /// protocol (Kitty, iTerm2, Sixel) with halfblock Unicode fallback.
+    #[arg(long = "images", conflicts_with = "no_images")]
+    pub images: bool,
+
     /// Query expression for selecting/filtering document elements
     ///
     /// Uses a jq-like syntax for navigating and extracting markdown structure.
