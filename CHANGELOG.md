@@ -19,19 +19,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multiple file arguments supported (e.g., `treemd *.md`)
 
 - **Compact tree style** - Gapless box-drawing characters for tree visualization ([#43](https://github.com/Epistates/treemd/issues/43))
-  - New `tree_style` config option: "spaced" (default) or "compact"
-  - Compact mode uses `├──` instead of `├─ ` for tighter trees
+  - Now uses `├──` instead of `├─ ` (connected, no gaps)
+  - Config option `tree_style`: "compact" (default) or "spaced"
   - Works in both `--tree` CLI output and query tree output
 
 - **Content filtering** - Hide YAML frontmatter and LaTeX in content view ([#43](https://github.com/Epistates/treemd/issues/43))
   - `hide_frontmatter` option strips `---\n...\n---` blocks at document start
-  - `hide_latex` option strips `$...$`, `$$...$$`, and `\begin{...}\end{...}` expressions
+  - `hide_latex` option strips math and LaTeX commands:
+    - Inline math: `$...$`
+    - Display math: `$$...$$`
+    - Environments: `\begin{...}\end{...}`
+    - Standalone commands: `\newpage`, `\clearpage`, `\tableofcontents`, etc.
+    - Commands with args: `\usepackage{...}`, `\documentclass{...}`, etc.
+    - Text formatting preserved: `\textbf{bold}` → `bold`
   - Both enabled by default, configurable via `[content]` section
   - Raw source view (`r`) shows unfiltered content
 
+- **File picker quit** - Press `q` to exit file picker dialog ([#43](https://github.com/Epistates/treemd/issues/43))
+
 - **Smart table collapsing** - Tables shrink proportionally on narrow terminals ([#43](https://github.com/Epistates/treemd/issues/43))
-  - `render_table()` now accepts optional `available_width` parameter
+  - Tables automatically constrain to viewport width
   - Columns shrink proportionally when table exceeds available width
+  - Accounts for nesting: list items, blockquotes, details blocks subtract indent
   - Minimum column width of 5 characters ensures readability
 
 ### Fixed
@@ -49,7 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Content filtering utilities** (`src/tui/ui/util.rs`)
   - Added `strip_frontmatter()` for YAML frontmatter removal
-  - Added `strip_latex()` for LaTeX expression removal
+  - Added `strip_latex()` for comprehensive LaTeX removal:
+    - Math: `$...$`, `$$...$$`, `\begin{...}\end{...}`
+    - Commands: `\newpage`, `\clearpage`, `\tableofcontents`, etc.
+    - Packages: `\usepackage{...}`, `\documentclass{...}`, etc.
+    - Formatting preserved: `\textbf{text}` → `text`
   - Added `filter_content()` combining both filters
   - Comprehensive test coverage for edge cases
 
@@ -62,10 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `should_hide_frontmatter()` and `should_hide_latex()` getters
   - Updated `scan_markdown_files()` to use custom directory
 
-- **Table rendering** (`src/tui/ui/table.rs`)
+- **Table rendering** (`src/tui/ui/table.rs`, `src/tui/ui/mod.rs`)
   - Added `available_width` parameter to `render_table()`
   - Added proportional column shrinking algorithm
   - Added `MIN_COL_WIDTH` constant (5)
+  - `render_markdown_enhanced()` now accepts and propagates `available_width`
+  - `render_block_to_lines()` propagates width with indent adjustments
+  - Width correctly reduced for nested content (lists, blockquotes, details)
 
 ## [0.5.6] - 2026-01-09
 

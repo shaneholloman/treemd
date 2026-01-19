@@ -271,12 +271,14 @@ pub fn strip_frontmatter(content: &str) -> String {
     content.to_string()
 }
 
-/// Strip LaTeX math expressions from content.
+/// Strip LaTeX math expressions and commands from content.
 ///
 /// Removes:
 /// - Inline math: `$...$`
 /// - Display math: `$$...$$`
 /// - LaTeX environments: `\begin{...}...\end{...}`
+/// - Standalone LaTeX commands: `\newpage`, `\clearpage`, `\tableofcontents`, etc.
+/// - LaTeX commands with arguments: `\usepackage{...}`, `\documentclass{...}`, etc.
 ///
 /// # Arguments
 /// * `content` - The document content
@@ -299,6 +301,25 @@ pub fn strip_latex(content: &str) -> String {
     // Match \begin{...}...\end{...} environments
     let latex_env = Regex::new(r"\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}").unwrap();
     let result = latex_env.replace_all(&result, "");
+
+    // Match standalone LaTeX commands on their own line (e.g., \newpage, \clearpage, \tableofcontents)
+    // These are commands that typically appear alone on a line
+    let standalone_cmd =
+        Regex::new(r"(?m)^\s*\\(newpage|clearpage|pagebreak|tableofcontents|maketitle|listoffigures|listoftables|appendix|frontmatter|mainmatter|backmatter)\s*$")
+            .unwrap();
+    let result = standalone_cmd.replace_all(&result, "");
+
+    // Match LaTeX commands with braces: \command{...} or \command[...]{...}
+    // Common ones: \usepackage, \documentclass, \title, \author, \date, \include, \input
+    let cmd_with_args =
+        Regex::new(r"\\(usepackage|documentclass|title|author|date|include|input|bibliography|bibliographystyle|setlength|renewcommand|newcommand)(\[[^\]]*\])?\{[^}]*\}")
+            .unwrap();
+    let result = cmd_with_args.replace_all(&result, "");
+
+    // Match other common inline LaTeX commands that might appear in text
+    // \textbf{}, \textit{}, \emph{}, etc. - replace with just the content
+    let text_formatting = Regex::new(r"\\(textbf|textit|emph|underline|texttt)\{([^}]*)\}").unwrap();
+    let result = text_formatting.replace_all(&result, "$2");
 
     result.to_string()
 }
@@ -403,6 +424,35 @@ mod tests {
             let result = strip_latex(content);
             // This won't match because there's no closing $
             assert_eq!(result, content);
+        }
+
+        #[test]
+        fn test_standalone_commands() {
+            let content = "Some text\n\\newpage\nMore text";
+            let result = strip_latex(content);
+            assert_eq!(result, "Some text\n\nMore text");
+        }
+
+        #[test]
+        fn test_clearpage() {
+            let content = "Chapter 1\n\\clearpage\nChapter 2";
+            let result = strip_latex(content);
+            assert_eq!(result, "Chapter 1\n\nChapter 2");
+        }
+
+        #[test]
+        fn test_usepackage() {
+            let content = "\\usepackage{amsmath}\nSome content";
+            let result = strip_latex(content);
+            assert_eq!(result, "\nSome content");
+        }
+
+        #[test]
+        fn test_text_formatting_preserved() {
+            // \textbf{} content should be preserved, just without the command
+            let content = "This is \\textbf{bold} text";
+            let result = strip_latex(content);
+            assert_eq!(result, "This is bold text");
         }
     }
 

@@ -399,12 +399,16 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
         // Clone interactive state to avoid keeping a borrow when passing app as mutable
         let interactive_state = app.interactive_state.clone();
 
+        // Calculate available width for tables (content area minus borders and padding)
+        let content_width = area.width.saturating_sub(2); // 2 for left/right borders
+
         render_markdown_enhanced(
             &content_text,
             &app.highlighter,
             &theme,
             selected_element_id,
             Some(&interactive_state), // Pass cloned copy to release borrow
+            Some(content_width),
         )
     };
 
@@ -1251,6 +1255,7 @@ fn render_markdown_enhanced(
     theme: &Theme,
     selected_element_id: Option<crate::tui::interactive::ElementId>,
     interactive_state: Option<&crate::tui::interactive::InteractiveState>,
+    available_width: Option<u16>,
 ) -> Text<'static> {
     let mut lines = Vec::new();
 
@@ -1581,7 +1586,9 @@ fn render_markdown_enhanced(
                             })
                             .unwrap_or(false);
 
-                        let nested_lines = render_block_to_lines(nested_block, highlighter, theme);
+                        // Reduce width by indent (5 spaces)
+                        let nested_width = available_width.map(|w| w.saturating_sub(5));
+                        let nested_lines = render_block_to_lines(nested_block, highlighter, theme, nested_width);
                         for (line_idx, nested_line) in nested_lines.into_iter().enumerate() {
                             let mut indented_spans = vec![];
 
@@ -1612,7 +1619,9 @@ fn render_markdown_enhanced(
                 // If we have nested blocks, render them recursively
                 if !nested.is_empty() {
                     for nested_block in nested {
-                        let nested_lines = render_block_to_lines(nested_block, highlighter, theme);
+                        // Reduce width by blockquote prefix (2 chars)
+                        let nested_width = available_width.map(|w| w.saturating_sub(2));
+                        let nested_lines = render_block_to_lines(nested_block, highlighter, theme, nested_width);
                         for nested_line in nested_lines {
                             let mut spans = vec![Span::styled(
                                 "│ ",
@@ -1669,8 +1678,7 @@ fn render_markdown_enhanced(
                     (false, None)
                 };
 
-                // Note: available_width is None here; width constraint would require
-                // threading viewport width through render_markdown_enhanced
+                // Use available_width for smart table collapsing
                 let table_lines = render_table(
                     headers,
                     alignments,
@@ -1679,7 +1687,7 @@ fn render_markdown_enhanced(
                     is_block_selected,
                     in_table_mode,
                     selected_cell,
-                    None, // available_width - for future enhancement
+                    available_width,
                 );
                 lines.extend(table_lines);
             }
@@ -1819,6 +1827,8 @@ fn render_markdown_enhanced(
                                 (false, None)
                             };
 
+                            // Reduce available width by indent (2 spaces)
+                            let nested_width = available_width.map(|w| w.saturating_sub(2));
                             let table_lines = render_table(
                                 nested_headers,
                                 nested_alignments,
@@ -1827,7 +1837,7 @@ fn render_markdown_enhanced(
                                 is_this_table_selected,
                                 in_table_mode,
                                 selected_cell,
-                                None, // available_width
+                                nested_width,
                             );
 
                             for nested_line in table_lines {
@@ -1837,8 +1847,10 @@ fn render_markdown_enhanced(
                             }
                         } else {
                             // Other block types use the standard renderer
+                            // Reduce width by indent (2 spaces)
+                            let block_width = available_width.map(|w| w.saturating_sub(2));
                             let nested_lines =
-                                render_block_to_lines(nested_block, highlighter, theme);
+                                render_block_to_lines(nested_block, highlighter, theme, block_width);
                             for (line_idx, nested_line) in nested_lines.into_iter().enumerate() {
                                 let mut spans = vec![];
 
@@ -2026,6 +2038,7 @@ fn render_block_to_lines(
     block: &ContentBlock,
     highlighter: &SyntaxHighlighter,
     theme: &Theme,
+    available_width: Option<u16>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -2101,7 +2114,9 @@ fn render_block_to_lines(
 
             // Render nested content (indented)
             for nested_block in nested {
-                let nested_lines = render_block_to_lines(nested_block, highlighter, theme);
+                // Reduce width by indent (2 spaces)
+                let nested_width = available_width.map(|w| w.saturating_sub(2));
+                let nested_lines = render_block_to_lines(nested_block, highlighter, theme, nested_width);
                 for nested_line in nested_lines {
                     let mut spans = vec![Span::raw("  ")];
                     spans.extend(nested_line.spans);
@@ -2116,7 +2131,7 @@ fn render_block_to_lines(
         } => {
             // Render table (non-interactive, no selection)
             let table_lines =
-                render_table(headers, alignments, rows, theme, false, false, None, None);
+                render_table(headers, alignments, rows, theme, false, false, None, available_width);
             lines.extend(table_lines);
         }
         ContentBlock::List { ordered, items } => {
@@ -2141,7 +2156,9 @@ fn render_block_to_lines(
 
                 // Render nested blocks (indented)
                 for nested in &item.blocks {
-                    let nested_lines = render_block_to_lines(nested, highlighter, theme);
+                    // Reduce width by indent (2 spaces)
+                    let nested_width = available_width.map(|w| w.saturating_sub(2));
+                    let nested_lines = render_block_to_lines(nested, highlighter, theme, nested_width);
                     for nested_line in nested_lines {
                         let mut spans = vec![Span::raw("  ")];
                         spans.extend(nested_line.spans);
@@ -2162,7 +2179,9 @@ fn render_block_to_lines(
 
             // Render nested blocks
             for nested in blocks {
-                let nested_lines = render_block_to_lines(nested, highlighter, theme);
+                // Reduce width by blockquote prefix (2 chars)
+                let nested_width = available_width.map(|w| w.saturating_sub(2));
+                let nested_lines = render_block_to_lines(nested, highlighter, theme, nested_width);
                 for nested_line in nested_lines {
                     let mut spans = vec![Span::styled(
                         "│ ",

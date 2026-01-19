@@ -458,6 +458,7 @@ fn add_file_picker_mode(kb: &mut Keybindings) {
 
     // Exit
     bind(kb, FilePicker, "Escape", ExitMode);
+    bind(kb, FilePicker, "q", Quit);
 }
 
 fn add_file_search_mode(kb: &mut Keybindings) {

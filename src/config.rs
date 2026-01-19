@@ -41,7 +41,7 @@ pub struct UiConfig {
     #[serde(default = "default_outline_width")]
     pub outline_width: u16,
 
-    /// Tree rendering style: "spaced" (default) or "compact" (gapless)
+    /// Tree rendering style: "compact" (default, gapless) or "spaced"
     #[serde(default = "default_tree_style")]
     pub tree_style: String,
 }
@@ -238,7 +238,7 @@ impl Default for UiConfig {
 }
 
 fn default_tree_style() -> String {
-    "spaced".to_string()
+    "compact".to_string()
 }
 
 impl Default for TerminalConfig {
