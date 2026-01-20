@@ -6,7 +6,7 @@ use crate::parser::output::Alignment;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Calculate a popup area with minimum size constraints.
 ///
@@ -92,14 +92,37 @@ pub fn align_text(text: &str, width: usize, alignment: &Alignment) -> String {
 
     // If text is longer than width, truncate it
     if text_width >= width {
-        // TODO: Proper Unicode-aware truncation
-        if width > 5 {
-            // Approximate truncation - not perfect but better than nothing
-            let approx_chars = width.saturating_sub(5);
-            let truncated = text.chars().take(approx_chars).collect::<String>();
-            return format!(" {}... ", truncated);
+        // Use single ellipsis character (…) which is 1 display width
+        // Much more space-efficient than "..." (3 chars)
+        if width > 3 {
+            // Truncate with ellipsis: " text… " or "text…" depending on space
+            let available = width.saturating_sub(2); // 1 for padding, 1 for ellipsis
+            let mut truncated = String::new();
+            let mut current_width = 0;
+            for c in text.chars() {
+                let char_width = c.width().unwrap_or(1);
+                if current_width + char_width > available {
+                    break;
+                }
+                truncated.push(c);
+                current_width += char_width;
+            }
+            // Pad to fill remaining space
+            let remaining = width.saturating_sub(current_width + 2); // +2 for " " and "…"
+            return format!(" {}…{}", truncated, " ".repeat(remaining));
         }
-        return format!(" {} ", text);
+        // Very narrow: just show what fits
+        let mut truncated = String::new();
+        let mut current_width = 0;
+        for c in text.chars() {
+            let char_width = c.width().unwrap_or(1);
+            if current_width + char_width > width {
+                break;
+            }
+            truncated.push(c);
+            current_width += char_width;
+        }
+        return truncated;
     }
 
     // Width includes padding we added earlier
@@ -302,19 +325,32 @@ pub fn strip_latex(content: &str) -> String {
     let latex_env = Regex::new(r"\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}").unwrap();
     let result = latex_env.replace_all(&result, "");
 
+    // Match font size commands (standalone, no args)
+    // Standard: \tiny, \scriptsize, \footnotesize, \small, \normalsize, \large, \Large, \LARGE, \huge, \Huge
+    // Extended: \HUGE, \ssmall, \miniscule (from moresize/memoir packages)
+    let font_size_cmd = Regex::new(
+        r"(?m)^\s*\\(tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge|HUGE|ssmall|miniscule)\s*$"
+    ).unwrap();
+    let result = font_size_cmd.replace_all(&result, "");
+
     // Match standalone LaTeX commands on their own line (e.g., \newpage, \clearpage, \tableofcontents)
-    // These are commands that typically appear alone on a line
-    let standalone_cmd =
-        Regex::new(r"(?m)^\s*\\(newpage|clearpage|pagebreak|tableofcontents|maketitle|listoffigures|listoftables|appendix|frontmatter|mainmatter|backmatter)\s*$")
-            .unwrap();
+    let standalone_cmd = Regex::new(
+        r"(?m)^\s*\\(newpage|clearpage|pagebreak|tableofcontents|maketitle|listoffigures|listoftables|appendix|frontmatter|mainmatter|backmatter|centering|raggedright|raggedleft|noindent|indent|par|bigskip|medskip|smallskip|vfill|hfill|newline|linebreak)\s*$"
+    ).unwrap();
     let result = standalone_cmd.replace_all(&result, "");
 
-    // Match LaTeX commands with braces: \command{...} or \command[...]{...}
-    // Common ones: \usepackage, \documentclass, \title, \author, \date, \include, \input
-    let cmd_with_args =
-        Regex::new(r"\\(usepackage|documentclass|title|author|date|include|input|bibliography|bibliographystyle|setlength|renewcommand|newcommand)(\[[^\]]*\])?\{[^}]*\}")
-            .unwrap();
-    let result = cmd_with_args.replace_all(&result, "");
+    // Match LaTeX commands with braces on their own line: \command{...} or \command[...]{...}
+    // These are typically preamble/setup commands that shouldn't appear in prose
+    let cmd_with_args_line = Regex::new(
+        r"(?m)^\s*\\(usepackage|documentclass|title|author|date|include|input|bibliography|bibliographystyle|setlength|renewcommand|newcommand|setcounter|addtocounter|pagenumbering|pagestyle|thispagestyle|geometry|hypersetup|definecolor|graphicspath|addbibresource)(\[[^\]]*\])?(\{[^}]*\})+\s*$"
+    ).unwrap();
+    let result = cmd_with_args_line.replace_all(&result, "");
+
+    // Match inline commands with args that should be stripped entirely (not in prose)
+    let cmd_with_args_inline = Regex::new(
+        r"\\(label|ref|cite|eqref|pageref|vspace|hspace)\{[^}]*\}"
+    ).unwrap();
+    let result = cmd_with_args_inline.replace_all(&result, "");
 
     // Match other common inline LaTeX commands that might appear in text
     // \textbf{}, \textit{}, \emph{}, etc. - replace with just the content
@@ -322,6 +358,24 @@ pub fn strip_latex(content: &str) -> String {
     let result = text_formatting.replace_all(&result, "$2");
 
     result.to_string()
+}
+
+/// Strip ALL lines starting with backslash (aggressive LaTeX filtering).
+///
+/// This is a simple catch-all for users whose documents have LaTeX commands
+/// not covered by the standard filtering.
+///
+/// # Arguments
+/// * `content` - The document content
+///
+/// # Returns
+/// Content with all backslash-starting lines removed
+pub fn strip_latex_aggressive(content: &str) -> String {
+    use regex::Regex;
+
+    // Match any line that starts with optional whitespace followed by backslash and letters
+    let backslash_line = Regex::new(r"(?m)^\s*\\[a-zA-Z].*$").unwrap();
+    backslash_line.replace_all(content, "").to_string()
 }
 
 /// Apply content filters based on configuration.
@@ -332,10 +386,16 @@ pub fn strip_latex(content: &str) -> String {
 /// * `content` - The document content
 /// * `hide_frontmatter` - Whether to strip YAML frontmatter
 /// * `hide_latex` - Whether to strip LaTeX expressions
+/// * `latex_aggressive` - Whether to use aggressive filtering (strip all backslash lines)
 ///
 /// # Returns
 /// Filtered content
-pub fn filter_content(content: &str, hide_frontmatter: bool, hide_latex: bool) -> String {
+pub fn filter_content(
+    content: &str,
+    hide_frontmatter: bool,
+    hide_latex: bool,
+    latex_aggressive: bool,
+) -> String {
     let mut result = content.to_string();
 
     if hide_frontmatter {
@@ -344,6 +404,11 @@ pub fn filter_content(content: &str, hide_frontmatter: bool, hide_latex: bool) -
 
     if hide_latex {
         result = strip_latex(&result);
+
+        // Apply aggressive filtering if enabled (catches anything standard missed)
+        if latex_aggressive {
+            result = strip_latex_aggressive(&result);
+        }
     }
 
     result
@@ -454,6 +519,95 @@ mod tests {
             let result = strip_latex(content);
             assert_eq!(result, "This is bold text");
         }
+
+        #[test]
+        fn test_font_size_normalsize() {
+            let content = "Some text\n\\normalsize\nMore text";
+            let result = strip_latex(content);
+            assert_eq!(result, "Some text\n\nMore text");
+        }
+
+        #[test]
+        fn test_font_size_large() {
+            let content = "\\Large\nHeading";
+            let result = strip_latex(content);
+            assert_eq!(result, "\nHeading");
+        }
+
+        #[test]
+        fn test_font_size_tiny() {
+            let content = "Normal\n\\tiny\nSmall text\n\\normalsize\nBack to normal";
+            let result = strip_latex(content);
+            assert_eq!(result, "Normal\n\nSmall text\n\nBack to normal");
+        }
+
+        #[test]
+        fn test_centering() {
+            let content = "\\centering\nCentered content";
+            let result = strip_latex(content);
+            assert_eq!(result, "\nCentered content");
+        }
+
+        #[test]
+        fn test_label_ref_stripped() {
+            let content = "See Figure \\ref{fig:example} for details.";
+            let result = strip_latex(content);
+            assert_eq!(result, "See Figure  for details.");
+        }
+
+        #[test]
+        fn test_cite_stripped() {
+            let content = "As shown by \\cite{smith2020} in their work.";
+            let result = strip_latex(content);
+            assert_eq!(result, "As shown by  in their work.");
+        }
+
+        #[test]
+        fn test_vspace_hspace_stripped() {
+            let content = "Text\\vspace{1em}More text\\hspace{2cm}End";
+            let result = strip_latex(content);
+            assert_eq!(result, "TextMore textEnd");
+        }
+
+        #[test]
+        fn test_geometry_stripped() {
+            let content = "\\geometry{margin=1in}\nDocument content";
+            let result = strip_latex(content);
+            assert_eq!(result, "\nDocument content");
+        }
+    }
+
+    mod strip_latex_aggressive_tests {
+        use super::*;
+
+        #[test]
+        fn test_aggressive_strips_any_backslash_line() {
+            let content = "Normal text\n\\unknowncommand\nMore text";
+            let result = strip_latex_aggressive(content);
+            assert_eq!(result, "Normal text\n\nMore text");
+        }
+
+        #[test]
+        fn test_aggressive_strips_with_args() {
+            let content = "\\customcmd{arg}\nContent here";
+            let result = strip_latex_aggressive(content);
+            assert_eq!(result, "\nContent here");
+        }
+
+        #[test]
+        fn test_aggressive_preserves_prose() {
+            let content = "Regular text without backslash commands";
+            let result = strip_latex_aggressive(content);
+            assert_eq!(result, content);
+        }
+
+        #[test]
+        fn test_aggressive_preserves_inline_backslash() {
+            // Text with backslash not at line start should be preserved
+            let content = "Some text with \\command inline";
+            let result = strip_latex_aggressive(content);
+            assert_eq!(result, content);
+        }
     }
 
     mod detect_checkbox_tests {
@@ -549,7 +703,8 @@ mod tests {
         #[test]
         fn test_truncation_when_too_long() {
             let result = align_text("This is a very long text", 10, &Alignment::Left);
-            assert!(result.contains("..."));
+            // Now uses single ellipsis character (…) instead of three dots
+            assert!(result.contains("…"));
             // Should be truncated with ellipsis
         }
 

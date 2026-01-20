@@ -3678,6 +3678,11 @@ impl App {
         self.config.content.hide_latex
     }
 
+    /// Check if aggressive LaTeX filtering is enabled (from config)
+    pub fn should_latex_aggressive(&self) -> bool {
+        self.config.content.latex_aggressive
+    }
+
     /// Follow the currently selected link
     pub fn follow_selected_link(&mut self) -> Result<(), String> {
         let link = match self.get_selected_link() {

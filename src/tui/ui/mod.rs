@@ -379,6 +379,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
             &content_text,
             app.should_hide_frontmatter(),
             app.should_hide_latex(),
+            app.should_latex_aggressive(),
         )
     } else {
         content_text

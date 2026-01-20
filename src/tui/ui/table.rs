@@ -22,7 +22,52 @@ pub struct TableRenderContext<'a> {
 }
 
 /// Minimum column width (including padding) to maintain readability
-const MIN_COL_WIDTH: usize = 5;
+const MIN_COL_WIDTH: usize = 3;
+
+/// Calculate column widths using content-weighted area approach
+///
+/// Instead of using max cell width, use average cell width weighted by content.
+/// This gives fairer distribution when one column has a single outlier value.
+fn calculate_column_widths(headers: &[String], rows: &[Vec<String>]) -> Vec<usize> {
+    let col_count = headers.len();
+
+    if rows.is_empty() {
+        // No data rows, use header widths
+        return headers.iter().map(|h| h.width().max(1)).collect();
+    }
+
+    let mut col_widths: Vec<usize> = vec![0; col_count];
+
+    // Calculate average width per column from data rows (not headers)
+    // This focuses on actual content, as forthrin suggested
+    for (i, _header) in headers.iter().enumerate() {
+        let mut total_width = 0usize;
+        let mut cell_count = 0usize;
+        let mut max_width = 0usize;
+
+        for row in rows {
+            if let Some(cell) = row.get(i) {
+                let cell_width = cell.width();
+                total_width += cell_width;
+                cell_count += 1;
+                max_width = max_width.max(cell_width);
+            }
+        }
+
+        if cell_count > 0 {
+            // Use weighted average: blend of average and max
+            // This prevents one outlier from dominating but ensures content fits
+            let avg_width = total_width / cell_count;
+            // Weight: 70% average, 30% max - balances fairness with readability
+            col_widths[i] = (avg_width * 7 + max_width * 3) / 10;
+        }
+
+        // Ensure column is at least as wide as header
+        col_widths[i] = col_widths[i].max(headers[i].width()).max(1);
+    }
+
+    col_widths
+}
 
 /// Render a complete table with headers, alignments, and rows
 ///
@@ -51,45 +96,69 @@ pub fn render_table(
         return lines;
     }
 
-    // Calculate column widths using Unicode display width
     let col_count = headers.len();
-    let mut col_widths: Vec<usize> = headers.iter().map(|h| h.width()).collect();
 
-    for row in rows {
-        for (i, cell) in row.iter().enumerate().take(col_count) {
-            col_widths[i] = col_widths[i].max(cell.width());
-        }
-    }
+    // Calculate column widths using content-weighted approach
+    let mut col_widths = calculate_column_widths(headers, rows);
 
-    // Add padding
+    // Start with normal padding (1 space each side = 2 total)
+    let mut padding = 2usize;
+
+    // Add initial padding
     for width in &mut col_widths {
-        *width += 2; // 1 space on each side
+        *width += padding;
     }
 
     // Smart table collapsing: shrink columns proportionally if table is too wide
     if let Some(max_width) = available_width {
         let max_width = max_width as usize;
-        // Calculate total width: columns + borders (col_count + 1 for │ characters)
-        // Plus 2 for selection indicator spacing when selected/in_table_mode
         let prefix_width = if in_table_mode || is_selected { 2 } else { 0 };
         let border_width = col_count + 1; // │ between and around columns
-        let total_width: usize = col_widths.iter().sum::<usize>() + border_width + prefix_width;
 
-        if total_width > max_width && max_width > border_width + prefix_width {
+        // Try shrinking with progressively less padding
+        loop {
+            let total_width: usize = col_widths.iter().sum::<usize>() + border_width + prefix_width;
+
+            if total_width <= max_width || max_width <= border_width + prefix_width {
+                break;
+            }
+
             // Available space for column content
             let available_for_cols = max_width.saturating_sub(border_width + prefix_width);
             let current_col_total: usize = col_widths.iter().sum();
 
-            if current_col_total > 0 {
-                // Calculate shrink ratio
-                let shrink_ratio = available_for_cols as f64 / current_col_total as f64;
-
-                // Apply proportional shrinking to each column
-                for width in &mut col_widths {
-                    let new_width = ((*width as f64) * shrink_ratio) as usize;
-                    *width = new_width.max(MIN_COL_WIDTH);
-                }
+            if current_col_total == 0 {
+                break;
             }
+
+            // Check if we can fit by reducing padding first (before shrinking content)
+            if padding > 0 {
+                let potential_savings = col_count * padding;
+                if total_width - potential_savings <= max_width {
+                    // Reducing padding is enough - recalculate with less padding
+                    let needed_reduction = total_width - max_width;
+                    let padding_reduction = (needed_reduction / col_count).min(padding);
+                    for width in &mut col_widths {
+                        *width = width.saturating_sub(padding_reduction);
+                    }
+                    padding = padding.saturating_sub(padding_reduction);
+                    continue;
+                }
+                // Remove all padding and try again
+                for width in &mut col_widths {
+                    *width = width.saturating_sub(padding);
+                }
+                padding = 0;
+                continue;
+            }
+
+            // Padding exhausted, now shrink columns proportionally
+            let shrink_ratio = available_for_cols as f64 / current_col_total as f64;
+            for width in &mut col_widths {
+                let new_width = ((*width as f64) * shrink_ratio) as usize;
+                *width = new_width.max(MIN_COL_WIDTH);
+            }
+            break;
         }
     }
 

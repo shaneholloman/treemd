@@ -86,6 +86,11 @@ pub struct ContentConfig {
     /// Hide LaTeX math expressions ($...$, $$...$$, \begin{...}) (default: true)
     #[serde(default = "default_hide_latex")]
     pub hide_latex: bool,
+
+    /// Aggressive LaTeX filtering: strip ALL lines starting with backslash (default: false)
+    /// Enable this if standard filtering misses some LaTeX commands
+    #[serde(default = "default_latex_aggressive")]
+    pub latex_aggressive: bool,
 }
 
 impl Default for ContentConfig {
@@ -93,6 +98,7 @@ impl Default for ContentConfig {
         Self {
             hide_frontmatter: default_hide_frontmatter(),
             hide_latex: default_hide_latex(),
+            latex_aggressive: default_latex_aggressive(),
         }
     }
 }
@@ -103,6 +109,10 @@ fn default_hide_frontmatter() -> bool {
 
 fn default_hide_latex() -> bool {
     true
+}
+
+fn default_latex_aggressive() -> bool {
+    false
 }
 
 /// Custom theme color overrides
