@@ -342,20 +342,31 @@ pub fn strip_latex(content: &str) -> String {
     // Match LaTeX commands with braces on their own line: \command{...} or \command[...]{...}
     // These are typically preamble/setup commands that shouldn't appear in prose
     let cmd_with_args_line = Regex::new(
-        r"(?m)^\s*\\(usepackage|documentclass|title|author|date|include|input|bibliography|bibliographystyle|setlength|renewcommand|newcommand|setcounter|addtocounter|pagenumbering|pagestyle|thispagestyle|geometry|hypersetup|definecolor|graphicspath|addbibresource)(\[[^\]]*\])?(\{[^}]*\})+\s*$"
+        r"(?m)^\s*\\(usepackage|documentclass|title|author|date|include|input|bibliography|bibliographystyle|setlength|renewcommand|newcommand|setcounter|addtocounter|pagenumbering|pagestyle|thispagestyle|geometry|hypersetup|definecolor|graphicspath|addbibresource|fontsize|sethlcolor|titlespacing|titleformat|captionsetup|lstset)(\[[^\]]*\])?(\{[^}]*\})+\s*$"
     ).unwrap();
     let result = cmd_with_args_line.replace_all(&result, "");
 
     // Match inline commands with args that should be stripped entirely (not in prose)
     let cmd_with_args_inline = Regex::new(
-        r"\\(label|ref|cite|eqref|pageref|vspace|hspace)\{[^}]*\}"
-    ).unwrap();
+        r"\\(label|ref|cite|eqref|pageref|vspace|hspace|phantom|hphantom|vphantom)\{[^}]*\}",
+    )
+    .unwrap();
     let result = cmd_with_args_inline.replace_all(&result, "");
 
     // Match other common inline LaTeX commands that might appear in text
-    // \textbf{}, \textit{}, \emph{}, etc. - replace with just the content
-    let text_formatting = Regex::new(r"\\(textbf|textit|emph|underline|texttt)\{([^}]*)\}").unwrap();
+    // \textbf{}, \textit{}, \emph{}, \hl{}, etc. - replace with just the content
+    let text_formatting =
+        Regex::new(r"\\(textbf|textit|emph|underline|texttt|hl|textsf|textsc|textsl)\{([^}]*)\}")
+            .unwrap();
     let result = text_formatting.replace_all(&result, "$2");
+
+    // Match \textcolor{color}{text} - preserve text, strip color command
+    let textcolor = Regex::new(r"\\textcolor\{[^}]*\}\{([^}]*)\}").unwrap();
+    let result = textcolor.replace_all(&result, "$1");
+
+    // Match \colorbox{color}{text} - preserve text
+    let colorbox = Regex::new(r"\\colorbox\{[^}]*\}\{([^}]*)\}").unwrap();
+    let result = colorbox.replace_all(&result, "$1");
 
     result.to_string()
 }

@@ -318,6 +318,7 @@ pub struct App {
     config_has_custom_outline_width: bool,
     pub bookmark_position: Option<String>, // Bookmarked heading text (was: outline position)
     collapsed_headings: HashSet<String>,   // Track which headings are collapsed by text
+    pub filter_by_todos: bool,             // Filter outline to show only headings with open todos
     pub current_theme: ThemeName,
     pub theme: Theme,
     pub show_theme_picker: bool,
@@ -525,6 +526,7 @@ impl App {
             config_has_custom_outline_width,
             bookmark_position: None,
             collapsed_headings,
+            filter_by_todos: false,
             current_theme,
             theme,
             show_theme_picker: false,
@@ -1102,6 +1104,7 @@ impl App {
             ToggleOutline => self.toggle_outline(),
             OutlineWidthIncrease => self.cycle_outline_width(true),
             OutlineWidthDecrease => self.cycle_outline_width(false),
+            ToggleTodoFilter => self.toggle_todo_filter(),
 
             // === Bookmarks ===
             SetBookmark => self.set_bookmark(),
@@ -1770,20 +1773,94 @@ impl App {
         !preamble.trim().is_empty()
     }
 
+    /// Check if a heading's section contains open todos (- [ ])
+    fn heading_has_open_todos(&self, heading_text: &str) -> bool {
+        if let Some(content) = self.document.extract_section(heading_text) {
+            // Check for unchecked todo pattern: - [ ] or * [ ]
+            content.contains("- [ ]") || content.contains("* [ ]")
+        } else {
+            false
+        }
+    }
+
+    /// Check if a heading or any of its descendants have open todos
+    fn heading_tree_has_open_todos(&self, node: &HeadingNode) -> bool {
+        // Check this heading's direct content
+        if self.heading_has_open_todos(&node.heading.text) {
+            return true;
+        }
+        // Recursively check children
+        for child in &node.children {
+            if self.heading_tree_has_open_todos(child) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Build a set of heading texts that have open todos (directly or in descendants)
+    fn headings_with_open_todos(&self) -> HashSet<String> {
+        let mut result = HashSet::new();
+        for node in &self.tree {
+            self.collect_headings_with_todos(node, &mut result);
+        }
+        result
+    }
+
+    /// Recursively collect headings that should be shown when filtering by todos
+    fn collect_headings_with_todos(&self, node: &HeadingNode, result: &mut HashSet<String>) {
+        if self.heading_tree_has_open_todos(node) {
+            // This heading or a descendant has todos, include it
+            result.insert(node.heading.text.clone());
+            // Also recursively add children that have todos
+            for child in &node.children {
+                self.collect_headings_with_todos(child, result);
+            }
+        }
+    }
+
     /// Rebuild outline items from the tree, optionally adding document overview
     fn rebuild_outline_items(&mut self) {
-        self.outline_items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
+        let mut items = Self::flatten_tree(&self.tree, &self.collapsed_headings);
+
+        // Apply todo filter if enabled
+        if self.filter_by_todos {
+            let headings_with_todos = self.headings_with_open_todos();
+            items.retain(|item| headings_with_todos.contains(&item.text));
+        }
+
+        self.outline_items = items;
 
         // Add document overview entry if there's preamble content or no headings
+        // When filtering by todos, only show overview if it has todos
         let has_preamble = Self::has_preamble_content(&self.document);
-        if has_preamble || self.document.headings.is_empty() {
+        let preamble_has_todos = self.filter_by_todos
+            && self
+                .document
+                .content
+                .split_once("\n#")
+                .map_or(false, |(preamble, _)| {
+                    preamble.contains("- [ ]") || preamble.contains("* [ ]")
+                });
+
+        if !self.filter_by_todos && (has_preamble || self.document.headings.is_empty()) {
             self.outline_items.insert(
                 0,
                 OutlineItem {
                     level: 0,
                     text: DOCUMENT_OVERVIEW.to_string(),
                     expanded: true,
-                    has_children: !self.outline_items.is_empty(), // Has children if there are other items
+                    has_children: !self.outline_items.is_empty(),
+                },
+            );
+        } else if self.filter_by_todos && preamble_has_todos {
+            self.outline_items.insert(
+                0,
+                OutlineItem {
+                    level: 0,
+                    text: DOCUMENT_OVERVIEW.to_string(),
+                    expanded: true,
+                    has_children: !self.outline_items.is_empty(),
                 },
             );
         }
@@ -2827,6 +2904,42 @@ impl App {
         } else {
             // When showing outline, switch focus back to outline
             self.focus = Focus::Outline;
+        }
+    }
+
+    /// Toggle filtering outline by open todos
+    pub fn toggle_todo_filter(&mut self) {
+        self.filter_by_todos = !self.filter_by_todos;
+
+        // Rebuild outline with/without filter
+        let selected_text = self.selected_heading_text().map(|s| s.to_string());
+        self.rebuild_outline_items();
+
+        // Try to restore selection
+        if let Some(text) = selected_text {
+            if !self.select_by_text(&text) {
+                // Selection no longer visible, select first item
+                if !self.outline_items.is_empty() {
+                    self.outline_state.select(Some(0));
+                    self.outline_scroll_state =
+                        ScrollbarState::new(self.outline_items.len()).position(0);
+                }
+            }
+        } else if !self.outline_items.is_empty() {
+            self.outline_state.select(Some(0));
+            self.outline_scroll_state = ScrollbarState::new(self.outline_items.len()).position(0);
+        }
+
+        // Set status message
+        if self.filter_by_todos {
+            let count = self.outline_items.len();
+            self.set_status_message(&format!(
+                "Todo filter ON: {} heading{} with open todos",
+                count,
+                if count == 1 { "" } else { "s" }
+            ));
+        } else {
+            self.set_status_message("Todo filter OFF: showing all headings");
         }
     }
 

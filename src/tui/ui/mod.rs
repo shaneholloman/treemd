@@ -17,7 +17,8 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap,
+    Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
+    ScrollbarState, Wrap,
 };
 use table::render_table;
 use util::{detect_checkbox_in_text, filter_content};
@@ -423,6 +424,15 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
             app.doc_search_matches.len(),
             &theme,
         );
+    }
+
+    // Update content_height with actual rendered line count (not raw markdown lines)
+    // This fixes EOF scroll behavior - scroll stops when last line is at viewport bottom
+    let rendered_line_count = rendered_text.lines.len() as u16;
+    if app.content_height != rendered_line_count {
+        app.content_height = rendered_line_count;
+        app.content_scroll_state =
+            ScrollbarState::new(rendered_line_count as usize).position(app.content_scroll as usize);
     }
 
     let paragraph = Paragraph::new(rendered_text)
@@ -1589,7 +1599,8 @@ fn render_markdown_enhanced(
 
                         // Reduce width by indent (5 spaces)
                         let nested_width = available_width.map(|w| w.saturating_sub(5));
-                        let nested_lines = render_block_to_lines(nested_block, highlighter, theme, nested_width);
+                        let nested_lines =
+                            render_block_to_lines(nested_block, highlighter, theme, nested_width);
                         for (line_idx, nested_line) in nested_lines.into_iter().enumerate() {
                             let mut indented_spans = vec![];
 
@@ -1622,7 +1633,8 @@ fn render_markdown_enhanced(
                     for nested_block in nested {
                         // Reduce width by blockquote prefix (2 chars)
                         let nested_width = available_width.map(|w| w.saturating_sub(2));
-                        let nested_lines = render_block_to_lines(nested_block, highlighter, theme, nested_width);
+                        let nested_lines =
+                            render_block_to_lines(nested_block, highlighter, theme, nested_width);
                         for nested_line in nested_lines {
                             let mut spans = vec![Span::styled(
                                 "│ ",
@@ -1850,8 +1862,12 @@ fn render_markdown_enhanced(
                             // Other block types use the standard renderer
                             // Reduce width by indent (2 spaces)
                             let block_width = available_width.map(|w| w.saturating_sub(2));
-                            let nested_lines =
-                                render_block_to_lines(nested_block, highlighter, theme, block_width);
+                            let nested_lines = render_block_to_lines(
+                                nested_block,
+                                highlighter,
+                                theme,
+                                block_width,
+                            );
                             for (line_idx, nested_line) in nested_lines.into_iter().enumerate() {
                                 let mut spans = vec![];
 
@@ -2117,7 +2133,8 @@ fn render_block_to_lines(
             for nested_block in nested {
                 // Reduce width by indent (2 spaces)
                 let nested_width = available_width.map(|w| w.saturating_sub(2));
-                let nested_lines = render_block_to_lines(nested_block, highlighter, theme, nested_width);
+                let nested_lines =
+                    render_block_to_lines(nested_block, highlighter, theme, nested_width);
                 for nested_line in nested_lines {
                     let mut spans = vec![Span::raw("  ")];
                     spans.extend(nested_line.spans);
@@ -2131,8 +2148,16 @@ fn render_block_to_lines(
             rows,
         } => {
             // Render table (non-interactive, no selection)
-            let table_lines =
-                render_table(headers, alignments, rows, theme, false, false, None, available_width);
+            let table_lines = render_table(
+                headers,
+                alignments,
+                rows,
+                theme,
+                false,
+                false,
+                None,
+                available_width,
+            );
             lines.extend(table_lines);
         }
         ContentBlock::List { ordered, items } => {
@@ -2159,7 +2184,8 @@ fn render_block_to_lines(
                 for nested in &item.blocks {
                     // Reduce width by indent (2 spaces)
                     let nested_width = available_width.map(|w| w.saturating_sub(2));
-                    let nested_lines = render_block_to_lines(nested, highlighter, theme, nested_width);
+                    let nested_lines =
+                        render_block_to_lines(nested, highlighter, theme, nested_width);
                     for nested_line in nested_lines {
                         let mut spans = vec![Span::raw("  ")];
                         spans.extend(nested_line.spans);

@@ -91,6 +91,7 @@ fn add_normal_mode(kb: &mut Keybindings) {
     bind(kb, Normal, "w", ToggleOutline);
     bind(kb, Normal, "[", OutlineWidthDecrease);
     bind(kb, Normal, "]", OutlineWidthIncrease);
+    bind(kb, Normal, "t", ToggleTodoFilter);
 
     // Bookmarks
     bind(kb, Normal, "m", SetBookmark);

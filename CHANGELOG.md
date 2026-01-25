@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Config option `tree_style`: "compact" (default) or "spaced"
   - Works in both `--tree` CLI output and query tree output
 
+- **Todo filter for outline** - Filter heading tree to show only headings with open todos ([#44](https://github.com/Epistates/treemd/issues/44))
+  - Press `t` to toggle filtering by open todos (`- [ ]` or `* [ ]`)
+  - Shows only headings that contain open todos (directly or in descendants)
+  - Preserves hierarchy: parent headings shown if any child has todos
+  - Status message shows count of headings with open todos
+
 - **Content filtering** - Hide YAML frontmatter and LaTeX in content view ([#43](https://github.com/Epistates/treemd/issues/43))
   - `hide_frontmatter` option strips `---\n...\n---` blocks at document start
   - `hide_latex` option strips math and LaTeX commands:
@@ -49,8 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **EOF scroll behavior** - Content no longer scrolls past the last line ([#43](https://github.com/Epistates/treemd/issues/43))
+  - Now uses actual *rendered* line count (not raw markdown lines) for scroll limits
   - Scroll stops when last line is visible at bottom of viewport
-  - Affects `scroll_content_down()`, `scroll_page_down()`, `scroll_page_down_interactive()`, and `last()`
+  - Consistent behavior across all scroll methods (j/k, Page Up/Down, Home/End)
 
 ### Technical
 
